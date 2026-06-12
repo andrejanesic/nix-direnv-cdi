@@ -4,7 +4,16 @@ go 1.26.2
 
 require (
 	github.com/opencontainers/runtime-spec v1.3.0
+	tags.cncf.io/container-device-interface v1.1.0
 	tags.cncf.io/container-device-interface/specs-go v1.1.0
 )
 
-require golang.org/x/mod v0.19.0 // indirect
+require (
+	github.com/fsnotify/fsnotify v1.5.1 // indirect
+	github.com/moby/sys/capability v0.4.0 // indirect
+	github.com/opencontainers/runtime-tools v0.9.1-0.20251114084447-edf4cb3d2116 // indirect
+	golang.org/x/mod v0.19.0 // indirect
+	golang.org/x/sys v0.19.0 // indirect
+	gopkg.in/yaml.v3 v3.0.1 // indirect
+	sigs.k8s.io/yaml v1.4.0 // indirect
+)

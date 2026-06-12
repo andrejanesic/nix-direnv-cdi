@@ -9,6 +9,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/andrejanesic/nix-direnv-cdi/internal/cdispec"
 	"github.com/andrejanesic/nix-direnv-cdi/internal/devshell"
@@ -75,6 +76,13 @@ func cmdGen(args []string) error {
 		return err
 	}
 
+	if *mode == "local" {
+		return errors.New("local mode not implemented (PLAN milestone 5)")
+	}
+	if *mode != "shared" {
+		return fmt.Errorf("unknown --mode %q (want shared|local)", *mode)
+	}
+
 	ds, err := devshell.Discover()
 	if err != nil {
 		return err
@@ -94,12 +102,39 @@ func cmdGen(args []string) error {
 		return err
 	}
 
-	// TODO(milestone 2): resolve the per-mode output dir, write the spec, then
-	// print the `--device` reference and the `export DIRENV_CDI=...` line.
-	_ = mode
-	_ = out
-	_ = spec
-	return errors.New("gen: spec placement & write not implemented (PLAN milestone 2)")
+	// Shared placement: write to ~/.config/cdi (or --out override).
+	dir := *out
+	if dir == "" {
+		dir, err = sharedSpecDir()
+		if err != nil {
+			return err
+		}
+	}
+	if err := cdispec.Write(spec, dir, deviceName); err != nil {
+		return err
+	}
+
+	ref := cdispec.Kind + "=" + deviceName
+	// Human-readable status to stderr so stdout stays eval-clean.
+	fmt.Fprintf(os.Stderr, "wrote CDI spec for %s -> %s\n", ds.ProjectRoot,
+		filepath.Join(dir, "nix-direnv-"+deviceName+".json"))
+	// stdout: the device reference and the eval-able export line.
+	fmt.Println(ref)
+	fmt.Printf("export DIRENV_CDI=%s\n", ref)
+	return nil
+}
+
+// sharedSpecDir resolves the shared CDI spec directory: $XDG_CONFIG_HOME/cdi,
+// falling back to ~/.config/cdi. (PLAN §2 shared placement.)
+func sharedSpecDir() (string, error) {
+	if xdg := os.Getenv("XDG_CONFIG_HOME"); xdg != "" {
+		return filepath.Join(xdg, "cdi"), nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("resolve home dir: %w", err)
+	}
+	return filepath.Join(home, ".config", "cdi"), nil
 }
 
 // cmdHook runs the createRuntime hook. It is best-effort: any error is reported
