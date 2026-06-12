@@ -148,14 +148,43 @@ Three tiers. Runtime selection: **detect** which CDI-capable runtime(s) are pres
 
 ## 6. Milestones
 
-1. **Scaffold** — Go module, CLI skeleton, CI (build + Tier A), `flake.nix`.
-2. **`gen` (shared mode)** — devshell discovery + closure walk + spec build/validate + write + `$DIRENV_CDI`. Tier A tests.
-3. **`hook`** — port the wrap logic with typed OCI spec; Tier A tests against synthetic `config.json`.
-4. **Tier B integration** — runtime detection + the 13 assertions; **podman first**, then add the docker path.
-5. **`gen --mode local`** — and cover both placements in Tier B.
-6. **Tier C smoke** — real-flake fixture, nix-gated.
-7. **direnv integration + docs** — `direnvrc` snippet (`nix-direnv-cdi gen` after `use flake`, `eval $(... )` to export `$DIRENV_CDI`), one-time registration (`install`), README with the `--device "$DIRENV_CDI"` and compose `deploy.resources.reservations.devices` recipes.
-8. **Packaging** — nix flake app for `nix run` / profile install; the hook binary path the spec references resolves to the installed binary.
+Phases prefixed **✅** are implemented; each carries an *Implementation* subsection recording how it was built. Unprefixed phases are pending.
+
+### ✅ 1. Scaffold — Go module, CLI skeleton, CI (build + Tier A), `flake.nix`.
+
+#### Implementation
+- Module `github.com/andrejanesic/nix-direnv-cdi`, Go 1.26. `main.go` does hand-rolled subcommand dispatch (`gen`/`hook`/`install`/`version`/`help`) over stdlib `flag` — no cobra, keeping the single static binary dependency-free. `exitOnErr` centralises the top-level error→exit-1; `hook` is wired best-effort (never exits non-zero).
+- Package layout per §3: `internal/{devshell,cdispec,hook,ociconfig,fingerprint}`.
+- Implemented outright (fully specified, so not stubbed): `fingerprint.Compute` (hex SHA-256 of the cleaned project root, truncated to 16 chars → a valid CDI device name) + tests; `ociconfig.ReadState`/`Load` (decode the hook's OCI `State` from stdin, load `<bundle>/config.json` into the runtime-spec structs).
+- Stubbed with real signatures + PLAN references for later milestones: `devshell.Discover`, `cdispec.Build/Validate/Write`, `hook.Run`.
+- Dependencies kept minimal: `opencontainers/runtime-spec/specs-go` (OCI structs) and `…/container-device-interface/specs-go` (CDI spec struct). The CDI **parent** module (`pkg/cdi`, `pkg/parser` — the actual validation/naming logic) was deliberately *not* added until app code needed it (milestone 2).
+- CI: `.github/workflows/ci.yml` runs build + vet + Tier A tests on a normal checkout.
+- Dev shell: added the Go toolchain (`go`, `gopls`, `gotools`, `go-tools`, `delve`) to `shell.nix`, and `watch_file shell.nix` in `.envrc` so edits invalidate the nix-direnv flake-profile cache (`use flake` only watches `flake.nix`/`flake.lock`).
+- Deferred: flake **packaging** (`nix run` / profile install) stays in milestone 8 — `flake.nix` remains a devShell-only flake for now.
+
+### ✅ 2. `gen` (shared mode) — devshell discovery + closure walk + spec build/validate + write + `$DIRENV_CDI`. Tier A tests.
+
+#### Implementation
+- **`devshell.Discover`** reads the *loaded* direnv environment. Project root from `${DIRENV_DIR#-}` (fallback `os.Getwd`). Prefix and env come from decoding **`DIRENV_DIFF`** — direnv's serialized diff: `base64.RawURLEncoding` → `zlib` → JSON `{"p":prev,"n":next}`. Prefix = PATH entries present in `n` but absent from `p` (order-preserved, deduped — the dirs direnv prepended). Env = keys in `n` minus `PATH` and `DIRENV_*`. Closure = `nix-store -qR` over the gcroot resolved from `.direnv/flake-profile-*` (the non-`.rc` symlink, `EvalSymlinks`'d). Factored behind injectable seams (getenv / getwd / gcroot-resolver / closure-lister) so Tier A tests drive it with a fake env + fake closure — no nix, no direnv.
+  - *On the MVP:* `cdi-additive-test.sh` is a **synthetic** test — it injects a hand-rolled fake prefix and performs no real extraction. The `DIRENV_DIFF` mechanism above is the real implementation of §3's "read from the loaded direnv environment", verified end-to-end against the live shell.
+- **`cdispec.Build`** assembles one device named `<fingerprint>` with all edits on the device: mounts = each closure path `ro,rbind` (host == container for nix) plus the project root `rw,rbind`; env = the dev-shell vars (sorted) plus `DEVSHELL_PREFIX=<colon-joined prefix>`, and **never `PATH`**; exactly one `createRuntime` hook `{path: <this binary>, args: ["nix-direnv-cdi","hook"]}`. `cdiVersion` is computed by `cdi.MinimumRequiredVersion` (0.3.0 for these edits).
+- **`cdispec.Validate`** uses CNCF exported entry points only — `specs.ValidateVersion`, `parser.Validate{Vendor,Class,Device}Name`, and per-device `cdi.ContainerEdits.Validate()`.
+- **`cdispec.Write`** validates, `MkdirAll`+`chmod 0755` the spec dir (§1 traversability gotcha), then marshals the specs-go struct (its JSON tags, not hand-rolled fields) to `nix-direnv-<name>.json` (0644).
+- **`cmdGen`** (shared mode) resolves the dir to `$XDG_CONFIG_HOME/cdi` → `~/.config/cdi` (or `--out`), writes, and prints the device ref + `export DIRENV_CDI=…` to **stdout** (eval-clean) with status on stderr. `--mode local` returns the milestone-5 stub. This milestone re-introduced the CDI parent module into `go.mod` (now genuinely app-used).
+- **Open decisions (recorded, not yet changed):** env passthrough is literal/complete per §2 — it includes mkShell build internals (`out`, `phases`, `buildPhase`, `shellHook`, `stdenv`, …) alongside useful vars (`CC`, `NIX_CFLAGS_COMPILE`, `IN_NIX_SHELL`); `DEVSHELL_PREFIX` includes `<root>/.direnv/bin`; mounts use `rbind` (vs §2's "bind"); `Write` chmods only the leaf spec dir, not ancestors.
+- **Verification:** gofmt/vet/build/Tier A all green; a live `gen` emits a spec that passes the real `cdi.NewCache` loader (122 mounts, zero `PATH`/`DIRENV_*` leakage). A Tier B container run was blocked by this sandbox's rootless-podman id-mapping (one short of uid/gid 65534) — an environment limitation deferred to milestone 4, not a `gen` defect.
+
+### 3. `hook` — port the wrap logic with typed OCI spec; Tier A tests against synthetic `config.json`.
+
+### 4. Tier B integration — runtime detection + the 13 assertions; **podman first**, then add the docker path.
+
+### 5. `gen --mode local` — and cover both placements in Tier B.
+
+### 6. Tier C smoke — real-flake fixture, nix-gated.
+
+### 7. direnv integration + docs — `direnvrc` snippet (`nix-direnv-cdi gen` after `use flake`, `eval $(... )` to export `$DIRENV_CDI`), one-time registration (`install`), README with the `--device "$DIRENV_CDI"` and compose `deploy.resources.reservations.devices` recipes.
+
+### 8. Packaging — nix flake app for `nix run` / profile install; the hook binary path the spec references resolves to the installed binary.
 
 ---
 
