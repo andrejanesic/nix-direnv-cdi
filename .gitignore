@@ -1,2 +1,7 @@
 /.direnv/
 /**/*.un~
+
+# Go / nix build output
+/nix-direnv-cdi
+/result
+/result-*
