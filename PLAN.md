@@ -189,9 +189,19 @@ Phases prefixed **✅** are implemented; each carries an *Implementation* subsec
 
 ### 4. Tier B integration — runtime detection + the 13 assertions; **podman first**, then add the docker path.
 
+*Redirected:* the end-to-end integration coverage was implemented as the **real-flake test in phase 6** instead (decision: exercise a real `.direnv` + the full `gen → run` path rather than a synthetic prefix). That already provides runtime detection, the podman path, and the core assertions (T1/T2/T3/T6). Tier B remains **optional future work**: a *synthetic, nix-free* variant that runs on a bare CI runner (no nix/direnv needed), plus the full T1–T10 matrix and the docker (daemon-registered spec dir) path.
+
 ### 5. `gen --mode local` — and cover both placements in Tier B.
 
-### 6. Tier C smoke — real-flake fixture, nix-gated.
+### ✅ 6. Tier C smoke — real-flake fixture, nix-gated.
+
+#### Implementation
+- A committed fixture `testdata/fixture/` — `flake.nix` (a `devShell` whose only package is `pkgs.hello`, a tool absent from base images), `.envrc` (`use flake`), and a `flake.lock` **pinned to the project's exact nixpkgs rev** so `hello` substitutes from cache with no second nixpkgs fetch.
+- `integration_test.go` (package `main`, repo root) is **fully end-to-end**: it copies the fixture into a `t.TempDir()` (so `testdata/` is never polluted), `direnv allow`s it, then runs the real `gen` via **`direnv exec <fixture> <bin> gen --out <dir>`** — which loads the fixture's `.envrc` (`use flake` → materialises a real `.direnv`/gcroot, sets `DIRENV_DIFF`), so `gen` discovers the genuine prefix/env/`hello` closure. The resulting `--device` is then attached to a stock `busybox`.
+- **Assertions:** T2 — `hello` prints `Hello, world!` inside the container (the headline propagation proof); T1 — PATH is additive (`hello`'s nix bin dir prepended, busybox base preserved); T6 — control without the device shows `hello` absent; T3 — a base busybox tool still works with the device attached.
+- **Gating:** `t.Skip` under `-short` or when `nix`/`direnv`/`podman` are missing, so `go test ./...` stays green on a bare CI runner (where it skips) and *runs for real* wherever the runtime exists. `docker` is detected but its CDI path (daemon-registered spec dirs) is deferred — podman only.
+- **The 0755 traversability gotcha** (PLAN §1, MVP line 9): Go's `t.TempDir()` creates every level `0700`, which yields "unresolvable CDI devices"; the test widens the spec-dir and hook-binary-dir ancestor chains to `0755`.
+- **Verified:** all four sub-assertions pass against real podman (`Hello, world!` propagated; PATH additive across ~21 nix dirs + the busybox base); `-short` skips it; Tier A units unaffected.
 
 ### 7. direnv integration + docs — `direnvrc` snippet (`nix-direnv-cdi gen` after `use flake`, `eval $(... )` to export `$DIRENV_CDI`), one-time registration (`install`), README with the `--device "$DIRENV_CDI"` and compose `deploy.resources.reservations.devices` recipes.
 
