@@ -5,7 +5,6 @@
 package main
 
 import (
-	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -15,6 +14,7 @@ import (
 	"github.com/andrejanesic/nix-direnv-cdi/internal/devshell"
 	"github.com/andrejanesic/nix-direnv-cdi/internal/fingerprint"
 	"github.com/andrejanesic/nix-direnv-cdi/internal/hook"
+	"github.com/andrejanesic/nix-direnv-cdi/internal/install"
 )
 
 // version is overridden at build time via -ldflags "-X main.version=...".
@@ -193,8 +193,22 @@ func cmdHook(args []string) {
 	}
 }
 
-// cmdInstall registers the shared CDI spec dir with podman/docker. (PLAN §3
-// "install", optional, milestone 7.)
+// cmdInstall registers the shared CDI spec dir (the same dir gen --mode shared
+// writes to) with podman and docker so shared-mode devices resolve without a
+// per-run --cdi-spec-dir. (PLAN §3 "install", milestone 7.) Best-effort:
+// per-runtime failures fall back to printed manual instructions.
 func cmdInstall(args []string) error {
-	return errors.New("install: not implemented (PLAN milestone 7)")
+	fs := flag.NewFlagSet("install", flag.ContinueOnError)
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	sharedDir, err := sharedSpecDir()
+	if err != nil {
+		return err
+	}
+	paths, err := install.DefaultPaths(sharedDir)
+	if err != nil {
+		return err
+	}
+	return install.Run(paths, os.Stdout)
 }
