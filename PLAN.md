@@ -197,7 +197,15 @@ Phases prefixed **✅** are implemented; each carries an *Implementation* subsec
 - **Verified:** all 10 subtests pass against real podman.
 - **Deferred (the one remaining phase-4 item):** the **docker** runtime path — docker reads CDI specs only from daemon-registered dirs (no per-run `--cdi-spec-dir`), and `docker` here is a podman shim, so exercising it means registering a spec dir in `daemon.json`; left for later.
 
-### 5. `gen --mode local` — and cover both placements in Tier B.
+### ✅ 5. `gen --mode local` — and cover both placements in Tier B.
+
+#### Implementation
+- The shared-vs-local decision is factored into a pure, unit-tested helper `resolvePlacement(mode, out, projectRoot, sharedDir)` → `(dir, deviceName)`:
+  - **shared:** `dir = ~/.config/cdi` (or `--out`), `deviceName = fingerprint(projectRoot)`.
+  - **local:** `dir = <projectRoot>/.direnv/cdi` (or `--out`), `deviceName = "shell"` (constant).
+  - unknown mode → error; `--out` overrides only the directory, never the device name.
+- Local mode writes `nix-direnv-shell.json` under the project's `.direnv/cdi` (already gitignored, no registration). **stdout is identical in shape to shared** (line 1 = bare ref `nix-direnv.cdi/shell=shell`, line 2 = `export DIRENV_CDI=…`), so `--device "$DIRENV_CDI"` and the M4 stdout-parsing both keep working. Because local is unregistered and podman-only, it adds a **stderr hint** with the absolute spec dir: `podman run --cdi-spec-dir <abs>/.direnv/cdi --device "$DIRENV_CDI" <image> <cmd>`.
+- **Tests:** `placement_test.go` (Tier A) covers shared/local × default/`--out`, unknown mode, and shared-resolver-error propagation. `TestIntegration_LocalPlacement` (real-flake, nix-gated) runs `direnv exec <fixture> <bin> gen --mode local`, then `podman run --cdi-spec-dir <fixture>/.direnv/cdi --device nix-direnv.cdi/shell=shell busybox hello` → `Hello, world!`. So **both placements** are now exercised end-to-end (shared via phase 6 + the synthetic phase-4 spec-dir; local here).
 
 ### ✅ 6. Tier C smoke — real-flake fixture, nix-gated.
 
