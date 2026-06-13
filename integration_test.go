@@ -136,6 +136,86 @@ func TestIntegration_DevShellPropagates(t *testing.T) {
 	})
 }
 
+// TestIntegration_LocalPlacement is the M5 (PLAN §2 local) end-to-end test. It
+// proves local placement: `gen --mode local` (no --out) writes the spec into
+// the project's own .direnv/cdi with the constant device name "shell", and that
+// dir, passed to podman via --cdi-spec-dir, propagates the dev-shell into a
+// stock busybox container. Gated identically to the M4 test.
+func TestIntegration_LocalPlacement(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in -short mode")
+	}
+	for _, tool := range requiredTools {
+		if _, err := exec.LookPath(tool); err != nil {
+			t.Skipf("integration test requires %q on PATH (not found): %v", tool, err)
+		}
+	}
+	if _, err := exec.LookPath("docker"); err == nil {
+		t.Log("docker present but docker CDI path deferred (needs daemon-registered spec dirs); podman only for M5")
+	}
+
+	// 1. Hermetic fixture copy + persistent binary (same as M4). The hook path
+	//    is embedded into the spec at gen time, so binDir must survive the test
+	//    and be traversable for the rootless hook lookup.
+	fixture := copyFixture(t)
+	binDir := t.TempDir()
+	chmodTraversable(t, binDir)
+	bin := filepath.Join(binDir, "nix-direnv-cdi")
+	build(t, bin)
+
+	// 2. direnv allow so `direnv exec` loads the fixture.
+	runChecked(t, fixture, "direnv", "allow", fixture)
+
+	// 3. `direnv exec <fixture> <bin> gen --mode local` (NO --out). direnv exec
+	//    materialises the fixture's real .direnv first; local mode then writes
+	//    the spec into <fixture>/.direnv/cdi with device name "shell".
+	stdout := genLocal(t, fixture, bin)
+
+	// stdout line 1 must be the constant local device ref.
+	const localRef = "nix-direnv.cdi/shell=shell"
+	if ref := firstLine(stdout); ref != localRef {
+		t.Fatalf("device ref (stdout line 1) = %q, want %q\nfull stdout:\n%s", ref, localRef, stdout)
+	}
+
+	// 4. The spec dir is the project-local one. It (and the bin dir) must be
+	//    traversable for the rootless CDI resolver / hook lookup. .direnv is
+	//    created 0700 by direnv; widen the cdi subdir chain.
+	localSpecDir := filepath.Join(fixture, ".direnv", "cdi")
+	if _, err := os.Stat(filepath.Join(localSpecDir, "nix-direnv-shell.json")); err != nil {
+		t.Fatalf("expected local spec at %s/nix-direnv-shell.json: %v", localSpecDir, err)
+	}
+	chmodTraversable(t, localSpecDir)
+
+	// 5. Headline: podman with --cdi-spec-dir <fixture>/.direnv/cdi --device
+	//    nix-direnv.cdi/shell=shell must propagate the dev-shell-only `hello`.
+	t.Run("local_hello_propagates", func(t *testing.T) {
+		out := podmanRunDevice(t, localSpecDir, localRef, busyboxImage, "hello")
+		if !strings.Contains(out, helloOutput) {
+			t.Fatalf("local: dev-shell `hello` did not propagate via .direnv/cdi spec\nwant substring: %q\ngot:\n%s", helloOutput, out)
+		}
+		t.Logf("local-placement propagation proof:\n%s", strings.TrimSpace(out))
+	})
+}
+
+// genLocal runs `direnv exec <fixture> <bin> gen --mode local` (no --out) and
+// returns its stdout (line 1 = device ref). direnv exec materialises the
+// fixture's .direnv; local mode writes the spec into <fixture>/.direnv/cdi.
+func genLocal(t *testing.T, fixture, bin string) string {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), cmdTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "direnv", "exec", fixture, bin, "gen", "--mode", "local")
+	cmd.Dir = fixture
+	var stdout, stderr strings.Builder
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("gen --mode local via direnv exec: %v\nstdout:\n%s\nstderr:\n%s", err, stdout.String(), stderr.String())
+	}
+	t.Logf("gen --mode local stderr (status + hint):\n%s", strings.TrimSpace(stderr.String()))
+	return stdout.String()
+}
+
 // copyFixture copies the committed fixture (flake.nix, .envrc, flake.lock) into
 // a TempDir so testdata/ is never polluted, and makes the dir traversable.
 func copyFixture(t *testing.T) string {

@@ -67,7 +67,16 @@ func exitOnErr(err error) {
 }
 
 // cmdGen discovers the dev-shell, builds and validates the CDI spec, writes it,
-// and prints the device reference. (PLAN §3 "gen", milestone 2.)
+// and prints the device reference. (PLAN §3 "gen", milestones 2 & 5.)
+//
+// Placement differs by --mode (see resolvePlacement):
+//   - shared: ~/.config/cdi, device name = fingerprint(projectRoot); registered.
+//   - local:  $PWD/.direnv/cdi, constant device name "shell"; gitignored,
+//     unregistered, podman-only.
+//
+// stdout is identical in shape for both modes (line 1 = bare device ref, line 2
+// = the eval-able export) so `--device "$DIRENV_CDI"` works uniformly. local
+// mode adds an extra stderr hint with the --cdi-spec-dir to pass.
 func cmdGen(args []string) error {
 	fs := flag.NewFlagSet("gen", flag.ContinueOnError)
 	mode := fs.String("mode", "shared", "spec placement: shared|local")
@@ -76,19 +85,16 @@ func cmdGen(args []string) error {
 		return err
 	}
 
-	if *mode == "local" {
-		return errors.New("local mode not implemented (PLAN milestone 5)")
-	}
-	if *mode != "shared" {
-		return fmt.Errorf("unknown --mode %q (want shared|local)", *mode)
-	}
-
 	ds, err := devshell.Discover()
 	if err != nil {
 		return err
 	}
 
-	deviceName := fingerprint.Compute(ds.ProjectRoot)
+	dir, deviceName, err := resolvePlacement(*mode, *out, ds.ProjectRoot, sharedSpecDir)
+	if err != nil {
+		return err
+	}
+
 	self, err := os.Executable()
 	if err != nil {
 		return err
@@ -101,27 +107,63 @@ func cmdGen(args []string) error {
 	if err := cdispec.Validate(spec); err != nil {
 		return err
 	}
-
-	// Shared placement: write to ~/.config/cdi (or --out override).
-	dir := *out
-	if dir == "" {
-		dir, err = sharedSpecDir()
-		if err != nil {
-			return err
-		}
-	}
 	if err := cdispec.Write(spec, dir, deviceName); err != nil {
 		return err
 	}
 
 	ref := cdispec.Kind + "=" + deviceName
+	specPath := filepath.Join(dir, "nix-direnv-"+deviceName+".json")
 	// Human-readable status to stderr so stdout stays eval-clean.
-	fmt.Fprintf(os.Stderr, "wrote CDI spec for %s -> %s\n", ds.ProjectRoot,
-		filepath.Join(dir, "nix-direnv-"+deviceName+".json"))
+	fmt.Fprintf(os.Stderr, "wrote CDI spec for %s -> %s\n", ds.ProjectRoot, specPath)
+	if *mode == "local" {
+		// local is unregistered and podman-only, so the user must pass the spec
+		// dir explicitly. Emit the absolute path as a copy-pasteable hint.
+		absDir, aerr := filepath.Abs(dir)
+		if aerr != nil {
+			absDir = dir
+		}
+		fmt.Fprintf(os.Stderr,
+			"local mode (podman-only): attach with  podman run --cdi-spec-dir %s --device \"$DIRENV_CDI\" <image> <cmd>\n",
+			absDir)
+	}
 	// stdout: the device reference and the eval-able export line.
 	fmt.Println(ref)
 	fmt.Printf("export DIRENV_CDI=%s\n", ref)
 	return nil
+}
+
+// resolvePlacement maps (mode, out, projectRoot) to the spec output directory
+// and CDI device name, without any I/O beyond the injected sharedDir resolver.
+// It is the single source of truth for the shared-vs-local placement decision
+// (PLAN §2) and is unit-tested directly.
+//
+//   - shared: dir = sharedDir() (or out if non-empty); name = fingerprint.
+//   - local:  dir = <projectRoot>/.direnv/cdi (or out if non-empty); name = "shell".
+//   - other:  error.
+//
+// An explicit --out always overrides the per-mode default directory; the device
+// name is never affected by --out.
+func resolvePlacement(mode, out, projectRoot string, sharedDir func() (string, error)) (dir, deviceName string, err error) {
+	switch mode {
+	case "shared":
+		deviceName = fingerprint.Compute(projectRoot)
+		if out != "" {
+			return out, deviceName, nil
+		}
+		dir, err = sharedDir()
+		if err != nil {
+			return "", "", err
+		}
+		return dir, deviceName, nil
+	case "local":
+		deviceName = cdispec.Class // the constant device name "shell"
+		if out != "" {
+			return out, deviceName, nil
+		}
+		return filepath.Join(projectRoot, ".direnv", "cdi"), deviceName, nil
+	default:
+		return "", "", fmt.Errorf("unknown --mode %q (want shared|local)", mode)
+	}
 }
 
 // sharedSpecDir resolves the shared CDI spec directory: $XDG_CONFIG_HOME/cdi,
