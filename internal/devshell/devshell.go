@@ -102,12 +102,14 @@ func projectRoot(getenv getenvFunc, getwd func() (string, error)) (string, error
 	return wd, nil
 }
 
-// decodeDirenvDiff decodes direnv's DIRENV_DIFF: base64 (raw URL encoding) of a
+// decodeDirenvDiff decodes direnv's DIRENV_DIFF: URL-safe base64 of a
 // zlib-compressed JSON object {"p":{prev},"n":{new}}. "p" holds the values that
 // existed before direnv loaded (the keys it changed/removed); "n" holds the new
-// values direnv exported. Returns (prev, next).
+// values direnv exported. direnv (gzenv) emits PADDED URL-safe base64, so the
+// trailing '=' is stripped before a raw decode — tolerating padded and unpadded
+// forms alike. Returns (prev, next).
 func decodeDirenvDiff(s string) (prev, next map[string]string, err error) {
-	raw, err := base64.RawURLEncoding.DecodeString(s)
+	raw, err := base64.RawURLEncoding.DecodeString(strings.TrimRight(s, "="))
 	if err != nil {
 		return nil, nil, fmt.Errorf("base64: %w", err)
 	}

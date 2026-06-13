@@ -7,12 +7,13 @@ import (
 	"encoding/json"
 	"reflect"
 	"sort"
+	"strings"
 	"testing"
 )
 
-// encodeDirenvDiff produces a DIRENV_DIFF value the way direnv does: base64
-// (raw URL) of zlib-compressed JSON {"p":prev,"n":next}. Used to drive discover
-// with a faked environment.
+// encodeDirenvDiff produces a DIRENV_DIFF value the way direnv (gzenv) does:
+// PADDED URL-safe base64 of zlib-compressed JSON {"p":prev,"n":next}. Used to
+// drive discover with a faked environment.
 func encodeDirenvDiff(t *testing.T, prev, next map[string]string) string {
 	t.Helper()
 	payload, err := json.Marshal(struct {
@@ -30,7 +31,7 @@ func encodeDirenvDiff(t *testing.T, prev, next map[string]string) string {
 	if err := zw.Close(); err != nil {
 		t.Fatalf("zlib close: %v", err)
 	}
-	return base64.RawURLEncoding.EncodeToString(buf.Bytes())
+	return base64.URLEncoding.EncodeToString(buf.Bytes())
 }
 
 // fakeEnv builds a getenvFunc over a map.
@@ -159,6 +160,31 @@ func TestDecodeDirenvDiff_RoundTrip(t *testing.T) {
 	}
 	if !reflect.DeepEqual(gotPrev, prev) || !reflect.DeepEqual(gotNext, next) {
 		t.Errorf("round-trip mismatch: prev=%v next=%v", gotPrev, gotNext)
+	}
+}
+
+func TestDecodeDirenvDiff_AcceptsPadding(t *testing.T) {
+	// direnv (gzenv) emits PADDED URL-safe base64; decoding must accept the '='
+	// padding that appears whenever the compressed length isn't a multiple of 3.
+	// Regression: a raw-URL decode rejected the padding ("illegal base64 data"),
+	// breaking `gen` whenever the loaded env happened to encode to a padded length.
+	sawPadding := false
+	for i := 0; i < 8; i++ {
+		pad := strings.Repeat("x", i)
+		enc := encodeDirenvDiff(t, nil, map[string]string{"PATH": "/p", "PAD": pad})
+		if strings.HasSuffix(enc, "=") {
+			sawPadding = true
+		}
+		_, gotNext, err := decodeDirenvDiff(enc)
+		if err != nil {
+			t.Fatalf("decode failed (i=%d, padded=%v): %v", i, strings.HasSuffix(enc, "="), err)
+		}
+		if gotNext["PAD"] != pad {
+			t.Errorf("round-trip mismatch at i=%d: PAD=%q", i, gotNext["PAD"])
+		}
+	}
+	if !sawPadding {
+		t.Fatal("no fixture exercised base64 padding; test would be meaningless")
 	}
 }
 
