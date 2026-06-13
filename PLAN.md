@@ -187,9 +187,15 @@ Phases prefixed **✅** are implemented; each carries an *Implementation* subsec
 - **Tier A tests** drive `wrapEntrypoint` with synthetic specs + a temp rootfs across the relative / prefix-only / absolute-in-rootfs / T9 / `hostOf` / best-effort / clobber-aside cases.
 - **Verified end-to-end (real podman/crun):** with the M2-generated device on a stock `busybox`, PATH is additive (nix prefix prepended, image base preserved), a dev-shell-only tool (`go`) resolves and *runs* inside the container, and env/closure/workdir propagate — the core Tier B assertions (T1/T2 plus the T6 no-device control), pending their codification as the milestone-4 matrix.
 
-### 4. Tier B integration — runtime detection + the 13 assertions; **podman first**, then add the docker path.
+### ✅ 4. Tier B integration — runtime detection + the 13 assertions; **podman first**, then add the docker path.
 
-*Redirected:* the end-to-end integration coverage was implemented as the **real-flake test in phase 6** instead (decision: exercise a real `.direnv` + the full `gen → run` path rather than a synthetic prefix). That already provides runtime detection, the podman path, and the core assertions (T1/T2/T3/T6). Tier B remains **optional future work**: a *synthetic, nix-free* variant that runs on a bare CI runner (no nix/direnv needed), plus the full T1–T10 matrix and the docker (daemon-registered spec dir) path.
+#### Implementation
+- `tierb_test.go` (package `main`, repo root) is the **synthetic, nix-free** end-to-end test — the Go port of the MVP's assertion half (`cdi-additive-test.sh` lines 103–138). It needs only **podman** (no nix, no direnv), so it runs on a bare CI runner.
+- It fabricates a one-file fake dev-shell — `work/prefix/prefixtool` (`#!/bin/sh; echo PREFIXTOOL-RAN; echo "toolPATH=$PATH"`, the MVP's exact marker; a pure shell script, so there is no closure to mount) — then builds a real CDI spec for it via **`cdispec.Build` + `Write`** from a hand-made `DevShell{ProjectRoot: work, Prefix/Closure: [prefixDir]}`, **not** via `gen`/`direnv`. Mounts are source==dest, so `DEVSHELL_PREFIX` and the in-container prefix are the host `prefixDir`.
+- Drives `debian:bookworm-slim` (has `bash`, needed by T1/T4/T10) with `--device`, asserting the **full T1–T10 matrix** as `t.Run` subtests: additive PATH + base preserved (T1/T8), dev-shell-only tool reachable (T2) and as a bare entrypoint (T7), base tools intact (T3), real binary execs (T4), the `sh` entrypoint with no shebang recursion (T5), the no-device control (T6), and the two limitation cases against a real runtime — **T9** (absolute path into the RO mount runs but is *not* additive) and **T10** (absolute path into the writable rootfs *is* wrapped).
+- Reuses the phase-6 helpers (`chmodTraversable`, `podman`, `podmanRunNoDevice`, `build`, `cmdTimeout`) and the same `0755` traversability handling. Gated by `t.Skip` under `-short` or when podman is absent.
+- **Verified:** all 10 subtests pass against real podman.
+- **Deferred (the one remaining phase-4 item):** the **docker** runtime path — docker reads CDI specs only from daemon-registered dirs (no per-run `--cdi-spec-dir`), and `docker` here is a podman shim, so exercising it means registering a spec dir in `daemon.json`; left for later.
 
 ### 5. `gen --mode local` — and cover both placements in Tier B.
 
