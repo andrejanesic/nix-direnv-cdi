@@ -160,7 +160,7 @@ Phases prefixed **✅** are implemented; each carries an *Implementation* subsec
 - Dependencies kept minimal: `opencontainers/runtime-spec/specs-go` (OCI structs) and `…/container-device-interface/specs-go` (CDI spec struct). The CDI **parent** module (`pkg/cdi`, `pkg/parser` — the actual validation/naming logic) was deliberately *not* added until app code needed it (milestone 2).
 - CI: `.github/workflows/ci.yml` runs build + vet + Tier A tests on a normal checkout.
 - Dev shell: added the Go toolchain (`go`, `gopls`, `gotools`, `go-tools`, `delve`) to `shell.nix`, and `watch_file shell.nix` in `.envrc` so edits invalidate the nix-direnv flake-profile cache (`use flake` only watches `flake.nix`/`flake.lock`).
-- Deferred: flake **packaging** (`nix run` / profile install) stays in milestone 8 — `flake.nix` remains a devShell-only flake for now.
+- ~~Deferred: flake **packaging** (`nix run` / profile install) stays in milestone 8 — `flake.nix` remains a devShell-only flake for now.~~ Done in milestone 8.
 
 ### ✅ 2. `gen` (shared mode) — devshell discovery + closure walk + spec build/validate + write + `$DIRENV_CDI`. Tier A tests.
 
@@ -219,7 +219,14 @@ Phases prefixed **✅** are implemented; each carries an *Implementation* subsec
 
 ### 7. direnv integration + docs — `direnvrc` snippet (`nix-direnv-cdi gen` after `use flake`, `eval $(... )` to export `$DIRENV_CDI`), one-time registration (`install`), README with the `--device "$DIRENV_CDI"` and compose `deploy.resources.reservations.devices` recipes.
 
-### 8. Packaging — nix flake app for `nix run` / profile install; the hook binary path the spec references resolves to the installed binary.
+### ✅ 8. Packaging — nix flake app for `nix run` / profile install; the hook binary path the spec references resolves to the installed binary.
+
+#### Implementation
+- `flake.nix` gains `packages.<system>.{default,nix-direnv-cdi}` via `pkgs.buildGoModule` (over the existing `devShells`), plus `apps.<system>.default` pointing at `…/bin/nix-direnv-cdi`. So `nix run` / `nix run .#nix-direnv-cdi`, `nix build`, and `nix profile install` all work; both `x86_64-linux` and `aarch64-linux` are exposed.
+- Build details: `src = self` (the flake's git-tracked tree, so `.direnv`/untracked files are excluded and the build is hermetic); `vendorHash` pins the Go module set (recompute via the `fakeHash` → read-the-`got:`-hash idiom after dep changes); `env.CGO_ENABLED = 0` yields a **fully static, stripped** ELF (`golang.org/x/sys` is pure-Go syscalls, no cgo); `doCheck = false` because the test tiers are runtime-gated (Tier B/C need podman/nix/direnv, absent in the build sandbox). `meta.mainProgram` is set so `nix run` resolves the binary. No `buildvcs` workaround needed: the store `src` copy has no `.git`, so Go's VCS stamping is a no-op (unlike the linked-worktree dev checkout).
+- **Version stamping:** `version = self.shortRev or self.dirtyShortRev or "dev"` is injected with `-ldflags "-X main.version=…"`, so `nix-direnv-cdi version` reports the flake's exact (possibly `-dirty`) git rev — traceable to source.
+- **The headline requirement — hook path resolves to the *installed* binary — needs no Go change.** `cmdGen` embeds `os.Executable()` (`/proc/self/exe`) as the createRuntime hook `path`; when the running binary lives in the store, that resolves through any profile symlink to the immutable, content-addressed `/nix/store/…/bin/nix-direnv-cdi`, which is 0755-traversable (PLAN §1) and never moves. Verified: a real `gen` driven by the **store** binary (`direnv exec <fixture> <store-bin> gen`) wrote a spec whose hook `path` is exactly that store path.
+- **Verification:** `nix build .#nix-direnv-cdi` produces a statically-linked stripped binary; `nix run … -- version` prints the stamped rev; `nix flake show` lists `packages`/`apps`/`devShells` for both systems; `gofmt`/`vet`/`go build`/Tier A all stay green (no Go code changed).
 
 ---
 
