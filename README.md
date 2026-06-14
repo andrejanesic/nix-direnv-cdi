@@ -1,79 +1,48 @@
 # nix-direnv-cdi
 
-Make a project's **nix-direnv dev-shell** available inside **any OCI container**
-(podman, docker) with a single `--device`. **One** generic CDI device serves
-every project; a `createRuntime` hook injects the project's dev-shell — the
-read-only `/nix/store` closure, an additive `PATH`, and the dev-shell env —
-**dynamically at container-creation time**, reading what it needs from the
-loaded direnv environment it inherits.
+**Your project's nix dev-shell — inside any container, with one flag.**
+
+You already have a perfect, reproducible toolchain in your `flake.nix`: the right
+Go, Node, compilers, linters, CLIs, pinned to the bit. nix-direnv-cdi teleports
+that dev-shell **into any OCI container** — no Dockerfile, no `apt-get`, no
+rebuilding images — by attaching a single CDI device:
 
 ```sh
-# in a project whose .envrc has loaded its dev-shell:
-podman run --device "$DIRENV_CDI" busybox hello
-# Hello, world!     ← `hello` came from the dev-shell, not the image
+podman run --device "$DIRENV_CDI" <any-image> <your-tool>
 ```
 
-## How it works
+One generic device serves every project. The right dev-shell is chosen
+automatically, at run time, from the direnv environment you're already in.
 
-- **`install`** registers one generic device, `nix-direnv.cdi/shell=devshell`. It
-  carries no project data — only the hook.
-- **`gen`** (run in your project, e.g. from `.envrc`) writes the dev-shell's
-  store closure to `.direnv/cdi/mounts.json`.
-- At **`podman run --device …`** the hook — launched from your loaded dev-shell,
-  so it inherits `DIRENV_DIR`/`DIRENV_DIFF` — gates on being in an approved
-  dev-shell, bind-mounts the closure into the container by entering its mount
-  namespace, and wraps the entrypoint so `PATH` is additive and the dev-shell
-  env is exported. Outside the loaded shell the device is **inert**.
+---
 
-No per-project devices, no fingerprints, nothing baked: the same `$DIRENV_CDI`
-works for every project, and the right closure is chosen at run time.
+## See it in action
 
-## Install (once per machine)
+**The proof — a tool that exists only in your dev-shell, running in a stock image:**
+
+```console
+$ podman run --device "$DIRENV_CDI" busybox hello
+Hello, world!          # ← `hello` came from your dev-shell, not from busybox
+```
+
+**Run your real toolchain in a minimal image** — `go` here comes from the
+dev-shell; `alpine` doesn't ship it:
 
 ```sh
-nix run github:andrejanesic/nix-direnv-cdi -- install
-# or: nix profile install github:andrejanesic/nix-direnv-cdi && nix-direnv-cdi install
+podman run --device "$DIRENV_CDI" -v "$PWD:$PWD" -w "$PWD" alpine \
+  go test ./...
 ```
 
-`install` writes the generic device to `~/.config/cdi` and registers that
-directory with podman (a `containers.conf.d` drop-in) and, if present, docker
-(`/etc/docker/daemon.json` — needs root + a daemon restart; the exact change is
-printed if it can't apply it).
+**Reproducible CI / "works on my machine", gone** — the container runs the exact
+same tools as your laptop, with no custom image to build or maintain.
 
-## Per project
-
-In the project's `.envrc`:
-
-```sh
-use flake
-eval "$(nix-direnv-cdi gen)"   # writes .direnv/cdi/mounts.json and exports $DIRENV_CDI
-```
-
-or, with the `use_cdi` helper (copy `contrib/use_cdi.sh` into
-`~/.config/direnv/direnvrc`):
-
-```sh
-use flake
-use cdi
-```
-
-`gen` re-runs on every direnv reload, so the closure stays in sync as
-dependencies change. `.direnv/` is already gitignored.
-
-## Run
-
-From the project's dev-shell:
-
-```sh
-podman run --device "$DIRENV_CDI" <image> <cmd>
-```
-
-docker compose (CDI device reservation):
+**docker compose** — give a service your dev-shell:
 
 ```yaml
 services:
-  app:
-    image: busybox
+  dev:
+    image: alpine
+    command: go build ./...
     deploy:
       resources:
         reservations:
@@ -82,30 +51,66 @@ services:
               device_ids: ["nix-direnv.cdi/shell=devshell"]
 ```
 
-## Notes & limitations
+---
 
-- **Authorization model:** being in the loaded dev-shell *is* the gate. Run the
-  device from anywhere else and it does nothing — by design, we don't expose a
-  dev-shell you haven't entered (and thus approved via `direnv allow`).
-- **Runtimes:** verified on rootless **podman** (crun) and **runc**. Docker uses
-  runc, so it is expected to work; a real moby end-to-end smoke test is pending.
-  Every real podman/docker setup (rootless/rootful) is covered. **Out of scope:**
-  *bare* rootless `runc` invoked by an unprivileged user (no outer privileged
-  userns) — it would need a userns entry that pure Go can't perform; there the
-  hook simply no-ops (the container still runs, just without the dev-shell).
-- **Rootful podman / running as root:** the mount mechanism is *easier* as root
-  (real `CAP_SYS_ADMIN`, no userns barrier) and the read-only remount that's
-  refused under rootless *succeeds*, so the closure is properly read-only. But
-  the hook reads `DIRENV_DIR`/`DIRENV_DIFF` from its inherited environment, and
-  **`sudo` strips those** — so `sudo podman run …` leaves the device inert.
-  Preserve them: `sudo -E podman run …` (or
-  `sudo --preserve-env=DIRENV_DIR,DIRENV_DIFF podman run …`), or run from a root
-  shell that already has the dev-shell loaded.
-- **Read-only:** closure mounts are best-effort read-only. Under a rootless user
-  namespace the ro-remount is refused, but nix store paths are immutable and
-  mode `0555` on the host, so they're effectively read-only regardless.
-- **Known limitation (T9):** an absolute entrypoint that is a path *into* the
-  read-only store (e.g. `… /nix/store/…/bin/tool`) runs but its `PATH` is not
-  made additive. Run dev-shell tools by name.
+## Quick start
 
-See [PLAN.md](PLAN.md) for the full design and the findings behind it.
+**1. Install once per machine** (writes + registers the one generic device):
+
+```sh
+nix run github:andrejanesic/nix-direnv-cdi -- install
+# or: nix profile install github:andrejanesic/nix-direnv-cdi && nix-direnv-cdi install
+```
+
+**2. In your project's `.envrc`:**
+
+```sh
+use flake
+eval "$(nix-direnv-cdi gen)"      # writes .direnv/cdi/mounts.json, exports $DIRENV_CDI
+```
+
+(or copy [`contrib/use_cdi.sh`](contrib/use_cdi.sh) into `~/.config/direnv/direnvrc`
+and just write `use flake` then `use cdi`.)
+
+**3. Run anything with your dev-shell attached:**
+
+```sh
+podman run --device "$DIRENV_CDI" <image> <cmd>
+```
+
+---
+
+## How it works (in one breath)
+
+`install` registers **one** generic CDI device whose only content is a
+`createRuntime` hook. `gen` records your dev-shell's `/nix/store` **closure** to
+`.direnv/cdi/mounts.json`. When you `podman run --device …` *from the loaded
+dev-shell*, the hook — which inherits your direnv environment — **bind-mounts
+that closure into the container** (by entering its mount namespace) and **wraps
+the entrypoint** so the dev-shell's `bin` dirs are prepended to `PATH` and its
+env vars are set. Nothing per-project is baked into the device; the launching
+shell decides which dev-shell, at run time.
+
+→ Full design, mechanisms, and data flow: **[docs/](docs/readme.md)**.
+
+## Good to know
+
+- **Being in the dev-shell is the authorization.** The device only does anything
+  when launched from a shell that has the project's dev-shell loaded (you ran
+  `direnv allow`). Anywhere else it's **inert** — it mounts nothing. See
+  [docs/security.md](docs/security.md).
+- **Surgical, not the whole store.** Only this project's closure is mounted,
+  read-only (best-effort under rootless; nix store paths are immutable anyway).
+  Dev-shell env (incl. secrets) is read live and **never written to disk**.
+- **Runtimes.** Verified on rootless **podman** (crun) and **runc**; supported on
+  rootful podman and docker (rootless/rootful). One non-goal: bare rootless
+  `runc` with an unprivileged invoker. See [docs/caveats.md](docs/caveats.md).
+- **Limitation (T9).** An absolute path *into* the read-only store runs but isn't
+  made additive — run dev-shell tools by name.
+
+## Documentation
+
+- **[docs/](docs/readme.md)** — architecture, mechanisms, data flow, design
+  decisions, security, gotchas, caveats.
+- **[PLAN.md](PLAN.md)** — the full design history and milestones.
+- **[AGENTS.md](AGENTS.md)** — orientation for AI agents working in this repo.
