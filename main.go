@@ -95,10 +95,10 @@ func cmdGen(args []string) error {
 		return err
 	}
 
-	// Human-readable status to stderr so stdout stays eval-clean.
-	fmt.Fprintf(os.Stderr, "wrote %d closure paths for %s -> %s\n", len(closure), root, path)
-	// stdout: the constant device reference and the eval-able export line.
-	fmt.Println(cdispec.Ref)
+	// Human-readable status (incl. the device ref) to stderr so stdout stays
+	// eval-clean: `eval "$(nix-direnv-cdi gen)"` sets $DIRENV_CDI and nothing else.
+	fmt.Fprintf(os.Stderr, "nix-direnv-cdi: wrote %d closure paths -> %s (device %s)\n",
+		len(closure), path, cdispec.Ref)
 	fmt.Printf("export DIRENV_CDI=%s\n", cdispec.Ref)
 	return nil
 }

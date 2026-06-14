@@ -29,7 +29,7 @@ These are load-bearing facts. Items marked **VERIFIED** were confirmed empirical
 - **VERIFIED:** a `createRuntime` hook **can** inject mounts by **entering the container's mount namespace** (via the container `pid` from State) and mounting there. The container then sees the mount (read + execute confirmed).
   - **crun / rootless podman:** the hook runs as subuid-root *inside the container's own userns* → `setns(CLONE_NEWNS)` then `mount` works; entering the userns is rejected/unneeded.
   - **rootless runc, unprivileged invoker (`CapEff=0`, container in a child userns):** `setns(mnt)` fails `EPERM`; must `setns(CLONE_NEWUSER)` *first* (to gain caps in the child userns), then `setns(CLONE_NEWNS)`, then `mount`. **VERIFIED works.**
-  - **Robust strategy:** try mount-ns entry; on `EPERM`, fall back to userns+mount-ns entry. **VERIFIED necessary (runc) and sufficient (both).**
+  - **Robust strategy:** try mount-ns entry; on `EPERM`, fall back to userns+mount-ns entry. **VERIFIED necessary (runc) and sufficient (both).** (The shipped Go hook implements only the mount-ns entry; the `CLONE_NEWUSER` fallback can't be done in pure Go and is deferred — see §6 R3.)
   - Bind source paths (host `/nix/store/X`) are reachable from inside the container mount ns **pre-`pivot_root`**, and mounts created under `root.path` survive `pivot_root` → appear at `/...`. So plain `setns`+`mount --bind` suffices — no `open_tree`/`move_mount` needed.
   - **Prior art:** NVIDIA's `libnvidia-container` injects its mounts the same way — entering the container mount ns (`ns_enter(..., CLONE_NEWNS)` in `nvc_mount.c`). It does **only** `CLONE_NEWNS` (no userns entry), which is exactly why rootless GPU has historically been painful; our userns fallback closes that gap.
   - Because the hook is **OCI-standard** and embedded in the CDI device, it runs under **both crun and runc** → the device is cross-runtime. Real moby+CDI end-to-end is **not yet tested** (deferred smoke test); runc itself is verified.
@@ -156,14 +156,15 @@ Plus the new, dynamic-design behaviours:
 
 ## 6. Milestones (refactor)
 
-- **R1. PLAN rewrite** — this document (the spec for the refactor).
-- **R2. `cdispec` → generic device** + `install` registers the single device (hook `path` = installed binary). Drop env/mounts/fingerprint. Tier A.
-- **R3. `nsmount` + `hook`** — ns-entry bind-mount helper (mnt / userns+mnt fallback, Go `x/sys/unix`); hook gates on `DIRENV_DIR`, mounts the closure, reads `DIRENV_DIFF`, wraps the entrypoint. Tier A.
-- **R4. `gen` → `mounts.json`** from the gcroot; print the constant `$DIRENV_CDI`; runnable in `.envrc`.
-- **R5. Tier B** — synthetic dynamic-mount + gate matrix on podman.
-- **R6. Tier C** — real-flake end-to-end.
-- **R7. direnv integration + docs** — `.envrc` snippet (`use flake`; `nix-direnv-cdi gen`; `export DIRENV_CDI=…`), README, and the deferred real-docker smoke test.
-- **Cleanup** — delete the `fingerprint` package, placement modes, and superseded static tests.
+- **✅ R1. PLAN rewrite** — this document.
+- **✅ R2+R4. Producer side** — `cdispec.Build` produces the one generic device (hook only); `install` writes+registers it (hook `path` = the installed binary); `gen` writes the closure to `.direnv/cdi/mounts.json` from the gcroot (no `DIRENV_DIFF`, runnable in `.envrc`) and prints the constant `$DIRENV_CDI`. Combined because the new `gen` no longer touches `cdispec`. `fingerprint`/placement modes deleted. Tier A.
+- **✅ R3. `nsmount` + `hook`** — `hook` gates on `DIRENV_DIR`, injects the closure via `nsmount`, and wraps the entrypoint for additive `PATH` + dev-shell env from the inherited `DIRENV_DIFF`. `NDC_HOOK_LOG` enables opt-in debug logging.
+  - **`nsmount` does mount-ns-only entry** (`unshare(CLONE_FS)` — required, since Go runtime threads share `CLONE_FS` and that makes `setns(CLONE_NEWNS)` fail `EINVAL` — then `setns(CLONE_NEWNS)` + bind, on a dedicated locked-and-discarded thread). This covers rootless podman/crun (verified), rootful docker, and rootless docker. **The `CLONE_NEWUSER` fallback for bare rootless-runc with an unprivileged invoker is NOT implemented**: `setns(CLONE_NEWUSER)` requires a single-threaded process, impossible in pure Go (would need an `nsexec`-style C constructor à la runc). Verified feasible via `nsenter` in research; deferred.
+  - Mounts are file- or dir-typed to match the source; read-only is **best-effort** (rootless refuses the ro-remount; store paths are immutable `0555`).
+- **✅ R5. Tier B** — synthetic, nix-free dynamic-mount + gate matrix on podman.
+- **✅ R6. Tier C** — real-flake end-to-end (`install`/`gen`/`--device`, hello propagates, PATH additive).
+- **✅ R7. direnv integration + docs** — `.envrc` snippet (`use flake`; `eval "$(nix-direnv-cdi gen)"`) and the `contrib/use_cdi.sh` `use cdi` helper (both verified to run inside `.envrc`); `gen` stdout made eval-clean; README. **Deferred:** the real moby+CDI smoke test (this environment's `docker` is a podman shim).
+- **✅ Cleanup** — `fingerprint`, placement modes, and the static Tier A/B/C tests removed (in R2/R3).
 
 ---
 
