@@ -89,6 +89,10 @@ services:
   dev-shell you haven't entered (and thus approved via `direnv allow`).
 - **Runtimes:** verified on rootless **podman** (crun) and **runc**. Docker uses
   runc, so it is expected to work; a real moby end-to-end smoke test is pending.
+  Every real podman/docker setup (rootless/rootful) is covered. **Out of scope:**
+  *bare* rootless `runc` invoked by an unprivileged user (no outer privileged
+  userns) — it would need a userns entry that pure Go can't perform; there the
+  hook simply no-ops (the container still runs, just without the dev-shell).
 - **Rootful podman / running as root:** the mount mechanism is *easier* as root
   (real `CAP_SYS_ADMIN`, no userns barrier) and the read-only remount that's
   refused under rootless *succeeds*, so the closure is properly read-only. But
