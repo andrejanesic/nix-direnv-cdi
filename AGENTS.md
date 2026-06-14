@@ -26,7 +26,7 @@ A single Go binary, no runtime deps. CLI: `gen | hook | install | version`.
 | `internal/nsmount/` | enter the container mount ns and bind-mount the closure |
 | `internal/ociconfig/` | read OCI State (stdin) + `config.json` |
 | `internal/install/` | register the device dir with podman/docker (backup-then-auto) |
-| `integration/` | Tier B/C integration tests and real-flake fixture |
+| `integration/` | synthetic and e2e integration tests plus the flake fixture |
 | `flake.nix` | `nix run` / profile install; version-stamped static binary |
 | `docs/` | reference documentation (see `docs/readme.md`) |
 
@@ -34,13 +34,13 @@ A single Go binary, no runtime deps. CLI: `gen | hook | install | version`.
 
 ```sh
 go build ./...
-go test -short ./...        # Tier A units — no container, always runnable (what CI runs)
-go test ./...               # + Tier B (synthetic, needs podman) and Tier C (real-flake, needs nix+direnv+podman)
+go test ./... -skip '^(TestSynthetic|TestE2E)'  # unit tests only
+go test ./...                                   # unit + synthetic/e2e integration for the selected container CLI
 nix build .#nix-direnv-cdi  # package the binary
 ```
 
-Tier B/C `t.Skip` when their runtimes are absent, so `-short` stays green on a
-bare runner.
+Missing integration prerequisites are test failures. Use `-skip` only when
+intentionally omitting suites.
 
 ## Invariants to respect before editing
 
@@ -62,10 +62,10 @@ These are load-bearing; breaking them silently breaks the tool. Full detail in
 ## Verification expectation
 
 Logic changes to `hook`/`nsmount`/`cdispec` should be re-checked end-to-end
-against real podman (Tier B/C), not just unit tests — three real bugs in the
+against real container CLIs, not just unit tests — three real bugs in the
 dynamic hook were only caught by running a live container (`NDC_HOOK_LOG=<file>`
 enables hook tracing). Out of scope: bare rootless `runc` with an unprivileged
-invoker (a non-goal). Deferred: a real moby/docker smoke test.
+invoker (a non-goal).
 
 ## Full documentation
 

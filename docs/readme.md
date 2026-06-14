@@ -11,7 +11,7 @@ top-level [README](../README.md).
 | [mechanisms.md](mechanisms.md) | everyone | How it works end to end: the CDI hook, dynamic mount injection (ns-entry), additive `PATH`, and the full setup→generate→inject timeline. |
 | [design-decisions.md](design-decisions.md) | everyone | Why it's shaped this way, with the alternatives considered and rejected. |
 | [security.md](security.md) | users | The authorization model (the gate), exposure surface, read-only mounts, and secrets handling. |
-| [limitations.md](limitations.md) | users | Limitations, non-goals, the runtime support matrix, troubleshooting, and deferred verification. |
+| [limitations.md](limitations.md) | users | Limitations, non-goals, the runtime support matrix, and troubleshooting. |
 | [internals.md](internals.md) | maintainers | The non-obvious, load-bearing kernel/Go traps the implementation depends on. |
 
 ## Suggested reading order

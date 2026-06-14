@@ -22,6 +22,11 @@ Because it's a **standard OCI hook embedded in the CDI device**, it runs under
 both **crun** (podman) and **runc** (docker) — the device is cross-runtime, and
 opt-in (it only runs on containers you attach it to).
 
+Daemon-driven CLIs such as Docker may not pass the client shell environment to
+the hook. For Docker, pass `DIRENV_DIR` and `DIRENV_DIFF` through to the OCI
+process env (`--env DIRENV_DIR --env DIRENV_DIFF`). The hook uses that as a
+fallback when the hook environment lacks direnv context.
+
 `createRuntime` is the chosen lifecycle stage because it is the one that runs **in
 the host (runtime) namespace, after the container's mount namespace and mounts
 exist, but before `pivot_root`** — so it can read `config.json` and the OCI
@@ -67,13 +72,14 @@ env, then execs the real entrypoint.
 
 ```sh
 #!/bin/sh
+unset DIRENV_DIR DIRENV_DIFF
 export PATH="<nix prefix>:$PATH"
 export CC='gcc'        # dev-shell env vars, single-quoted
 exec "<real entrypoint>" "$@"
 ```
 
-The prefix and env come from decoding the inherited **`DIRENV_DIFF`** at run
-time (not baked into the spec). Resolution mirrors `command -v`:
+The prefix and env come from decoding **`DIRENV_DIFF`** at run time (not baked
+into the spec). Resolution mirrors `command -v`:
 
 - **relative** entrypoint → resolve across `prefix` (host-accessible `/nix`
   paths) then the image `PATH`; drop the shim into the first image-`PATH` dir so
@@ -129,7 +135,7 @@ nix-direnv-cdi gen
 [internals.md](internals.md)). That timing is what makes the `use cdi`
 integration possible.
 
-### Inject — per `podman run`
+### Inject — per container run
 
 ```
 $ podman run --device nix-direnv-cdi.org/env=current busybox hello      # from the loaded dev-shell
@@ -163,8 +169,8 @@ TIME C  the (wrapped) entrypoint execs
 |------|--------|---------|----|
 | closure (`/nix/store` paths) | gcroot → `nix-store -qR` | gen-time | `gen` → `mounts.json` |
 | which device | constant `nix-direnv-cdi.org/env=current` | — | the `--device` arg |
-| project root / gate | `DIRENV_DIR` (inherited) | run-time | hook |
-| `PATH` prefix + dev-shell env | `DIRENV_DIFF` (inherited) | run-time | hook |
+| project root / gate | `DIRENV_DIR` (hook env or OCI process env fallback) | run-time | hook |
+| `PATH` prefix + dev-shell env | `DIRENV_DIFF` (hook env or OCI process env fallback) | run-time | hook |
 | container pid / rootfs | OCI State (stdin) / `config.json` | run-time | hook |
 
 The split is deliberate: the **closure** is captured once at gen-time (it changes

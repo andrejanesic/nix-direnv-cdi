@@ -1,15 +1,13 @@
 package integration
 
-// Tier C: real-flake end-to-end. Materialises the committed fixture
-// dev-shell (provides `hello`), runs the real install/gen flow, and propagates
-// the dev-shell into a stock busybox via the generic device. Asserts the real
-// nix tool runs inside the container and PATH is additive. Gated on
-// nix+direnv+podman (skipped otherwise / under -short).
+// End-to-end integration. Materialises the committed fixture dev-shell
+// (provides `hello`), runs the real gen flow, and propagates the dev-shell into
+// a stock busybox via the selected container CLI. Asserts the real nix tool runs
+// inside the container and PATH is additive.
 
 import (
 	"context"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -17,18 +15,11 @@ import (
 	"github.com/andrejanesic/nix-direnv-cdi/internal/cdispec"
 )
 
-func requireRealFlake(t *testing.T) string {
+func requireE2E(t *testing.T) containerCLI {
 	t.Helper()
-	if testing.Short() {
-		t.Skip("skipping real-flake integration test in -short mode")
-	}
-	for _, b := range []string{"podman", "nix", "direnv"} {
-		if _, err := exec.LookPath(b); err != nil {
-			t.Skipf("%s not found; skipping real-flake test", b)
-		}
-	}
-	p, _ := exec.LookPath("podman")
-	return p
+	cli := requireContainerCLI(t)
+	requireTools(t, "nix", "direnv", "git")
+	return cli
 }
 
 // copyFixture materialises fixture into dst so the real .direnv is built in a
@@ -47,31 +38,40 @@ func copyFixture(t *testing.T, dst string) {
 			t.Fatal(err)
 		}
 	}
+	ctx, cancel := context.WithTimeout(context.Background(), cmdTimeout)
+	defer cancel()
+	if out, err := run(ctx, nil, "git", "-C", dst, "init", "-q"); err != nil {
+		t.Fatalf("git init fixture: %v\n%s", err, out)
+	}
+	if out, err := run(ctx, nil, "git", "-C", dst, "add", "."); err != nil {
+		t.Fatalf("git add fixture: %v\n%s", err, out)
+	}
 }
 
-func TestTierC_RealFlakeDevShell(t *testing.T) {
-	podman := requireRealFlake(t)
+func TestE2EFlakeDevShell(t *testing.T) {
+	cli := requireE2E(t)
 	bin := build(t)
 
 	work := t.TempDir()
 	chmodTraversable(t, work)
 	fixture := filepath.Join(work, "proj")
 	copyFixture(t, fixture)
+	direnvEnv := []string{"XDG_DATA_HOME=" + filepath.Join(work, "xdg-data")}
 
 	ctx, cancel := context.WithTimeout(context.Background(), cmdTimeout)
 	defer cancel()
 
 	// Allow the .envrc and materialise the real .direnv gcroot (use flake).
-	if out, err := run(ctx, nil, "direnv", "allow", fixture); err != nil {
+	if out, err := run(ctx, direnvEnv, "direnv", "allow", fixture); err != nil {
 		t.Fatalf("direnv allow: %v\n%s", err, out)
 	}
-	if out, err := run(ctx, nil, "direnv", "exec", fixture, "true"); err != nil {
+	if out, err := run(ctx, direnvEnv, "direnv", "exec", fixture, "true"); err != nil {
 		t.Fatalf("materialise .direnv: %v\n%s", err, out)
 	}
 
 	// Real `gen` in the fixture context -> writes .direnv/cdi/mounts.json and
 	// prints the constant device ref.
-	out, err := run(ctx, nil, "direnv", "exec", fixture, bin, "gen")
+	out, err := run(ctx, direnvEnv, "direnv", "exec", fixture, bin, "gen")
 	if err != nil {
 		t.Fatalf("gen: %v\n%s", err, out)
 	}
@@ -85,47 +85,48 @@ func TestTierC_RealFlakeDevShell(t *testing.T) {
 	chmodTraversable(t, mountsPath) // widen the .direnv/proj/work chain for the subuid hook
 
 	// The generic device, hook = our built binary.
-	specDir := filepath.Join(t.TempDir(), "cdi")
-	writeGenericSpec(t, specDir, bin)
-	device := []string{"--cdi-spec-dir", specDir, "--device", cdispec.Ref}
+	specDir := writeSpecForCLI(t, cli, bin)
+	device := cli.deviceArgs(specDir)
 
 	t.Run("hello_propagates_and_path_additive", func(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), cmdTimeout)
 		defer cancel()
-		args := []string{"exec", fixture, podman, "run", "--rm"}
+		args := []string{"exec", fixture, "env", "-u", "XDG_DATA_HOME", cli.path, "run", "--rm"}
 		args = append(args, device...)
+		args = append(args, cli.direnvPassthroughArgs()...)
 		args = append(args, busyboxImage, "sh", "-c", "hello; echo \"PATH=$PATH\"")
-		out, err := run(ctx, nil, "direnv", args...)
+		out, err := run(ctx, direnvEnv, "direnv", args...)
 		if err != nil {
-			t.Fatalf("podman run: %v\n%s", err, out)
+			t.Fatalf("%s run: %v\n%s", cli.name, err, out)
 		}
-		if !strings.Contains(out, "Hello, world!") { // T2: the real nix tool ran
+		if !strings.Contains(out, "Hello, world!") {
 			t.Errorf("hello did not run inside the container:\n%s", out)
 		}
-		if !strings.Contains(out, "hello-2.12.3") || !strings.Contains(out, "/bin") { // T1: additive
+		if !strings.Contains(out, "hello-2.12.3") || !strings.Contains(out, "/bin") {
 			t.Errorf("PATH not additive (nix prefix + image base):\n%s", out)
 		}
 	})
 
-	t.Run("base_tool_still_works_T3", func(t *testing.T) {
+	t.Run("base_tool_still_works", func(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), cmdTimeout)
 		defer cancel()
-		args := []string{"exec", fixture, podman, "run", "--rm"}
+		args := []string{"exec", fixture, "env", "-u", "XDG_DATA_HOME", cli.path, "run", "--rm"}
 		args = append(args, device...)
+		args = append(args, cli.direnvPassthroughArgs()...)
 		args = append(args, busyboxImage, "sh", "-c", "ls /bin/busybox >/dev/null && echo BASE_OK")
-		out, err := run(ctx, nil, "direnv", args...)
+		out, err := run(ctx, direnvEnv, "direnv", args...)
 		if err != nil {
-			t.Fatalf("podman run: %v\n%s", err, out)
+			t.Fatalf("%s run: %v\n%s", cli.name, err, out)
 		}
 		if !strings.Contains(out, "BASE_OK") {
 			t.Errorf("base tool broke with device attached:\n%s", out)
 		}
 	})
 
-	t.Run("control_no_device_T6", func(t *testing.T) {
+	t.Run("control_no_device", func(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), cmdTimeout)
 		defer cancel()
-		out, _ := run(ctx, nil, "direnv", "exec", fixture, podman, "run", "--rm", busyboxImage, "hello")
+		out, _ := run(ctx, direnvEnv, "direnv", "exec", fixture, "env", "-u", "XDG_DATA_HOME", cli.path, "run", "--rm", busyboxImage, "hello")
 		if strings.Contains(out, "Hello, world!") {
 			t.Errorf("without --device, hello must be absent:\n%s", out)
 		}

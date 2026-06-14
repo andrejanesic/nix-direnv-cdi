@@ -1,8 +1,9 @@
 package hook
 
-// Tier A unit tests for the hook core: the gate + mount-injection dispatch
+// Unit tests for the hook core: the gate + mount-injection dispatch
 // (run) and the entrypoint wrapper (wrapEntrypoint). No real container; the
-// mount step is injected. The actual ns-entry mount is covered by Tier B/C.
+// mount step is injected. The actual ns-entry mount is covered by integration
+// tests.
 
 import (
 	"os"
@@ -67,6 +68,7 @@ func TestWrap_RelativeEntry_ShimContent(t *testing.T) {
 	s := string(data)
 	for _, want := range []string{
 		"#!/bin/sh\n",
+		"unset DIRENV_DIR DIRENV_DIFF",
 		`export PATH="` + prefixDir + `:$PATH"`,
 		"export CC='gcc'",
 		`export WEIRD='a b'\''c'`, // single-quote escaped
@@ -193,5 +195,37 @@ func TestRun_GateOpen_MountsClosure(t *testing.T) {
 	}
 	if strings.Join(gotClosure, ",") != strings.Join(closure, ",") {
 		t.Errorf("mount closure = %v, want %v", gotClosure, closure)
+	}
+}
+
+func TestRun_GateOpen_FromProcessEnv(t *testing.T) {
+	project := t.TempDir()
+	closure := []string{"/nix/store/aaa"}
+	if err := devshell.WriteMounts(filepath.Join(project, ".direnv", "cdi", "mounts.json"), closure); err != nil {
+		t.Fatal(err)
+	}
+
+	called := false
+	mount := func(pid int, rootfs string, c []string) error {
+		called = true
+		if strings.Join(c, ",") != strings.Join(closure, ",") {
+			t.Errorf("mount closure = %v, want %v", c, closure)
+		}
+		return nil
+	}
+	getenv := func(k string) (string, bool) { return "", false }
+
+	rootfs := t.TempDir()
+	spec := &oci.Spec{Process: &oci.Process{
+		Args: []string{"sh"},
+		Env:  []string{"PATH=/bin", "DIRENV_DIR=-" + project},
+	}}
+	state := &oci.State{Pid: 4242, Bundle: t.TempDir()}
+
+	if err := run(state, spec, rootfs, getenv, mount); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if !called {
+		t.Error("process DIRENV_DIR fallback should open the gate")
 	}
 }

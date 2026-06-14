@@ -3,9 +3,9 @@
 // it (1) bind-mounts the project's dev-shell closure into the container by
 // entering the container's mount namespace, and (2) wraps the entrypoint so the
 // dev-shell prefix is prepended to PATH additively and the dev-shell env vars
-// are exported. Everything it needs is read at run time from the inherited
-// loaded-direnv environment (DIRENV_DIR, DIRENV_DIFF) plus the project's
-// .direnv/cdi/mounts.json. See docs/mechanisms.md.
+// are exported. It reads the loaded-direnv environment (DIRENV_DIR,
+// DIRENV_DIFF) from the hook environment when available, falling back to the OCI
+// process environment for daemon-driven CLIs. See docs/mechanisms.md.
 //
 // The entrypoint-wrap algorithm and its T1-T10 behaviour matrix (incl. the T9
 // limitation) are documented in docs/mechanisms.md; the dynamic mount injection
@@ -73,9 +73,10 @@ func resolveRootfs(spec *oci.Spec, bundle string) string {
 // and wraps the entrypoint for additive PATH + dev-shell env. Best-effort: a
 // mount failure is logged but never blocks the wrap or breaks the container.
 func run(state *oci.State, spec *oci.Spec, rootfs string, getenv getenvFunc, mount mountFunc) error {
-	dbg := debugLog(getenv)
+	runtimeGetenv := getenvWithProcessEnv(getenv, spec)
+	dbg := debugLog(runtimeGetenv)
 
-	dirRaw, ok := getenv("DIRENV_DIR")
+	dirRaw, ok := runtimeGetenv("DIRENV_DIR")
 	if !ok || dirRaw == "" {
 		dbg("gate closed: DIRENV_DIR unset; device inert")
 		return nil // not in an approved dev-shell -> the device is inert
@@ -96,7 +97,7 @@ func run(state *oci.State, spec *oci.Spec, rootfs string, getenv getenvFunc, mou
 	}
 
 	// 2. Additive PATH + dev-shell env via entrypoint wrapping.
-	prefix, env, has, derr := devshell.RuntimeEnv(getenv)
+	prefix, env, has, derr := devshell.RuntimeEnv(runtimeGetenv)
 	dbg("runtimeEnv: prefix=%d env=%d has=%v err=%v", len(prefix), len(env), has, derr)
 	if derr != nil {
 		return derr
@@ -105,6 +106,18 @@ func run(state *oci.State, spec *oci.Spec, rootfs string, getenv getenvFunc, mou
 		return nil
 	}
 	return wrapEntrypoint(spec, rootfs, prefix, env)
+}
+
+func getenvWithProcessEnv(getenv getenvFunc, spec *oci.Spec) getenvFunc {
+	return func(key string) (string, bool) {
+		if v, ok := getenv(key); ok {
+			return v, true
+		}
+		if spec == nil || spec.Process == nil {
+			return "", false
+		}
+		return lookupEnv(spec.Process.Env, key)
+	}
 }
 
 // debugLog returns a logger that appends to the file named by NDC_HOOK_LOG, or
@@ -160,6 +173,7 @@ func wrapEntrypoint(spec *oci.Spec, rootfs string, prefix []string, env map[stri
 	// double-quoted form is safe) plus each dev-shell var single-quoted (values
 	// may contain spaces, quotes, even newlines).
 	var blk strings.Builder
+	blk.WriteString("unset DIRENV_DIR DIRENV_DIFF\n")
 	if len(prefix) > 0 {
 		fmt.Fprintf(&blk, "export PATH=\"%s:$PATH\"\n", strings.Join(prefix, ":"))
 	}
@@ -271,13 +285,18 @@ func sortedKeys(m map[string]string) []string {
 
 // envValue returns the value of the first "<key>=<value>" entry in env, or "".
 func envValue(env []string, key string) string {
+	v, _ := lookupEnv(env, key)
+	return v
+}
+
+func lookupEnv(env []string, key string) (string, bool) {
 	pfx := key + "="
 	for _, e := range env {
 		if strings.HasPrefix(e, pfx) {
-			return strings.TrimPrefix(e, pfx)
+			return strings.TrimPrefix(e, pfx), true
 		}
 	}
-	return ""
+	return "", false
 }
 
 // splitPath splits a colon-separated PATH-like string, dropping empty fields.

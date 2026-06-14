@@ -42,6 +42,9 @@ same tools as your laptop, with no custom image to build or maintain.
 services:
   dev:
     image: alpine
+    environment:
+      - DIRENV_DIR
+      - DIRENV_DIFF
     command: go build ./...
     deploy:
       resources:
@@ -104,9 +107,12 @@ shell decides which dev-shell, at run time.
 - **Surgical, not the whole store.** Only this project's closure is mounted,
   read-only (best-effort under rootless; nix store paths are immutable anyway).
   Dev-shell env (incl. secrets) is read live and **never written to disk**.
-- **Runtimes.** Verified on rootless **podman** (crun) and **runc**; supported on
-  rootful podman and docker (rootless/rootful). One non-goal: bare rootless
-  `runc` with an unprivileged invoker. See [docs/limitations.md](docs/limitations.md).
+- **Runtimes.** Verified end-to-end on **podman** and **docker**. One non-goal:
+  bare rootless `runc` with an unprivileged invoker. See
+  [docs/limitations.md](docs/limitations.md).
+- **Docker daemon env.** Docker runs containers through a daemon, so pass
+  `DIRENV_DIR` and `DIRENV_DIFF` through (`--env DIRENV_DIR --env DIRENV_DIFF`,
+  or the Compose `environment` keys above) when using Docker directly.
 - **Limitation (T9).** An absolute path *into* the read-only store runs but isn't
   made additive — run dev-shell tools by name.
 
@@ -114,6 +120,8 @@ shell decides which dev-shell, at run time.
 
 - **[docs/](docs/readme.md)** — architecture, mechanisms (incl. data flow),
   design decisions, security, limitations, internals.
+- **[CONTRIBUTING.md](CONTRIBUTING.md)** — build, test, and integration
+  validation commands.
 - **[AGENTS.md](AGENTS.md)** — orientation for AI agents working in this repo.
 
 ## License

@@ -1,6 +1,6 @@
 package install
 
-// Tier A unit tests for the pure install logic — the docker daemon.json merge,
+// Unit tests for the pure install logic — the docker daemon.json merge,
 // the podman drop-in content, and the I/O orchestration against injected temp
 // paths. No real podman/docker, no root: these run under -short.
 

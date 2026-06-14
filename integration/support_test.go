@@ -1,8 +1,7 @@
 package integration
 
-// Shared helpers for the integration tiers (B: synthetic/nix-free, C:
-// real-flake). All container tests skip under -short or when the runtime is
-// absent, so `go test -short ./...` stays green on a bare runner.
+// Shared helpers for integration tests. Missing prerequisites are test failures;
+// use go test -skip to omit suites intentionally.
 
 import (
 	"bytes"
@@ -23,19 +22,63 @@ import (
 const (
 	cmdTimeout   = 5 * time.Minute
 	busyboxImage = "busybox"
+
+	envContainerCLI         = "NDC_CONTAINER_CLI"
+	envDockerCDISpecDir     = "NDC_DOCKER_CDI_SPEC_DIR"
+	defaultContainerCLI     = "docker"
+	defaultDockerCDISpecDir = "/etc/cdi"
 )
 
-// requirePodman skips the test unless podman is available (and not -short).
-func requirePodman(t *testing.T) string {
+type containerCLI struct {
+	name    string
+	path    string
+	specDir string
+}
+
+// requireContainerCLI returns the selected container CLI. By default tests use
+// Docker. Set NDC_CONTAINER_CLI=podman to exercise podman instead.
+func requireContainerCLI(t *testing.T) containerCLI {
 	t.Helper()
-	if testing.Short() {
-		t.Skip("skipping container integration test in -short mode")
+	name := os.Getenv(envContainerCLI)
+	if name == "" {
+		name = defaultContainerCLI
 	}
-	p, err := exec.LookPath("podman")
+	switch name {
+	case "podman", "docker":
+	default:
+		t.Fatalf("unsupported %s=%q (want podman or docker)", envContainerCLI, name)
+	}
+	p, err := exec.LookPath(name)
 	if err != nil {
-		t.Skip("podman not found; skipping integration test")
+		t.Fatalf("%s not found", name)
 	}
-	return p
+	cli := containerCLI{name: name, path: p}
+	if out, err := exec.Command(p, "info").CombinedOutput(); err != nil {
+		t.Fatalf("%s is not usable: %v\n%s", name, err, out)
+	}
+	if name == "docker" {
+		cli.specDir = os.Getenv(envDockerCDISpecDir)
+		if cli.specDir == "" {
+			cli.specDir = defaultDockerCDISpecDir
+		}
+		if err := os.MkdirAll(cli.specDir, 0o755); err != nil {
+			t.Fatalf("docker CDI spec dir %s is not writable: %v\n"+
+				"configure Docker to read a writable CDI spec directory, or create the default with:\n"+
+				"  sudo mkdir -p %s && sudo chown \"$USER:$(id -gn)\" %s",
+				cli.specDir, err, cli.specDir, cli.specDir)
+		}
+		chmodTraversable(t, cli.specDir)
+	}
+	return cli
+}
+
+func requireTools(t *testing.T, names ...string) {
+	t.Helper()
+	for _, name := range names {
+		if _, err := exec.LookPath(name); err != nil {
+			t.Fatalf("%s not found", name)
+		}
+	}
 }
 
 // build compiles the nix-direnv-cdi binary into a fresh, traversable dir and
@@ -44,7 +87,7 @@ func build(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
 	bin := filepath.Join(dir, "nix-direnv-cdi")
-	out, err := exec.Command("go", "build", "-o", bin, "..").CombinedOutput()
+	out, err := exec.Command("go", "build", "-buildvcs=false", "-o", bin, "..").CombinedOutput()
 	if err != nil {
 		t.Fatalf("go build: %v\n%s", err, out)
 	}
@@ -65,7 +108,7 @@ func chmodTraversable(t *testing.T, path string) {
 
 // writeGenericSpec writes the single generic CDI device to dir, with the hook
 // path set to binPath. Mirrors cdispec.Build/Write but is independent of the
-// binary so Tier B needs no `install` side effects.
+// binary so integration tests need no `install` side effects.
 func writeGenericSpec(t *testing.T, dir, binPath string) {
 	t.Helper()
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -79,6 +122,31 @@ func writeGenericSpec(t *testing.T, dir, binPath string) {
 		t.Fatal(err)
 	}
 	chmodTraversable(t, dir)
+}
+
+func writeSpecForCLI(t *testing.T, cli containerCLI, binPath string) string {
+	t.Helper()
+	if cli.name == "docker" {
+		writeGenericSpec(t, cli.specDir, binPath)
+		return cli.specDir
+	}
+	specDir := filepath.Join(t.TempDir(), "cdi")
+	writeGenericSpec(t, specDir, binPath)
+	return specDir
+}
+
+func (c containerCLI) deviceArgs(specDir string) []string {
+	if c.name == "podman" {
+		return []string{"--cdi-spec-dir", specDir, "--device", cdispec.Ref}
+	}
+	return []string{"--device", cdispec.Ref}
+}
+
+func (c containerCLI) direnvPassthroughArgs() []string {
+	if c.name != "docker" {
+		return nil
+	}
+	return []string{"--env", "DIRENV_DIR", "--env", "DIRENV_DIFF"}
 }
 
 // writeExecScript writes content to path as an executable script (0755),

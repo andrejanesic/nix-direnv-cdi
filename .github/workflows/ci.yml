@@ -16,11 +16,53 @@ jobs:
         with:
           go-version: "1.26"
           cache: true
+
       - name: Build
         run: go build ./...
+
       - name: Vet
         run: go vet ./...
-      - name: Tier A unit tests
-        # Tier A needs no container runtime. Tier B/C self-skip (t.Skip) when no
-        # CDI-capable runtime / nix is present, so they are safe to run here too.
-        run: go test ./...
+
+      - name: Unit tests
+        run: go test ./... -skip '^(TestSynthetic|TestE2E)'
+
+      - name: Configure Docker CDI
+        run: |
+          sudo mkdir -p /etc/docker /etc/cdi
+          sudo chown "$USER:$(id -gn)" /etc/cdi
+          if [ ! -f /etc/docker/daemon.json ]; then
+            echo '{}' | sudo tee /etc/docker/daemon.json >/dev/null
+          fi
+          sudo cp /etc/docker/daemon.json /etc/docker/daemon.json.bak
+          jq '.features = ((.features // {}) + {"cdi": true}) |
+              ."cdi-spec-dirs" = (((."cdi-spec-dirs" // ["/etc/cdi", "/var/run/cdi"]) + ["/etc/cdi"]) | unique)' \
+            /etc/docker/daemon.json |
+            sudo tee /etc/docker/daemon.json.tmp >/dev/null
+          sudo mv /etc/docker/daemon.json.tmp /etc/docker/daemon.json
+          sudo systemctl restart docker
+          docker info
+
+      - name: Synthetic integration (docker)
+        env:
+          NDC_CONTAINER_CLI: docker
+        run: go test ./integration -run '^TestSynthetic' -count=1 -v
+
+      - uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      - name: Install direnv
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y direnv
+
+      - name: End-to-end integration (docker)
+        env:
+          NDC_CONTAINER_CLI: docker
+        run: go test ./integration -run '^TestE2E' -count=1 -v
+
+      - name: End-to-end integration (podman)
+        env:
+          NDC_CONTAINER_CLI: podman
+        run: go test ./integration -run '^TestE2E' -count=1 -v

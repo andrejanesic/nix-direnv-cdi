@@ -11,7 +11,7 @@ edges, see [internals.md](internals.md).)
 | **rootless podman** (crun) | ✅ verified end-to-end |
 | **rootful podman / root** | ✅ supported — *easier* (proper read-only mounts). Use `sudo -E` so the gate env survives |
 | **rootless docker** (RootlessKit) | ✅ supported — structurally identical to rootless podman |
-| **rootful docker** | ✅ supported (uses runc); real-moby end-to-end smoke test pending |
+| **rootful docker** | ✅ verified end-to-end |
 | **bare rootless `runc`, unprivileged invoker** | ⛔ out of scope (non-goal) — hook no-ops gracefully |
 
 The shipped hook does **mount-namespace-only** entry, which is sufficient
@@ -21,6 +21,9 @@ mount ns — i.e. every real podman/docker configuration. See
 
 > **Docker** must have CDI enabled — on by default since Docker 28.3 (opt-in via
 > the `cdi` feature in 25.0–28.1). Podman supports CDI out of the box.
+> Docker users must pass the direnv bookkeeping variables through to the OCI
+> process env, for example `--env DIRENV_DIR --env DIRENV_DIFF`, because the
+> daemon may not inherit the client shell's loaded direnv environment.
 
 ## Troubleshooting
 
@@ -71,10 +74,3 @@ dev-shell isn't there):
   target, since it isn't how podman or docker run.
 - **Non-host-accessible prefixes.** The mechanism assumes the dev-shell prefix is
   host-accessible bind-mountable paths (true for nix store closures).
-
-## Deferred verification
-
-- **Real Docker/moby end-to-end.** Docker's runtime is runc, which is verified
-  directly; a one-off `docker run --device nix-direnv-cdi.org/env=current …` on a host with
-  genuine moby + CDI enabled would close the loop. (The development environment's
-  `docker` is a podman shim, so this can't be run there.)
