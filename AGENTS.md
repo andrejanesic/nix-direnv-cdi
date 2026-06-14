@@ -26,6 +26,7 @@ A single Go binary, no runtime deps. CLI: `gen | hook | install | version`.
 | `internal/nsmount/` | enter the container mount ns and bind-mount the closure |
 | `internal/ociconfig/` | read OCI State (stdin) + `config.json` |
 | `internal/install/` | register the device dir with podman/docker (backup-then-auto) |
+| `integration/` | Tier B/C integration tests and real-flake fixture |
 | `flake.nix` | `nix run` / profile install; version-stamped static binary |
 | `docs/` | reference documentation (see `docs/readme.md`) |
 

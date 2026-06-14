@@ -1,4 +1,4 @@
-package main
+package integration
 
 // Tier C: real-flake end-to-end. Materialises the committed fixture
 // dev-shell (provides `hello`), runs the real install/gen flow, and propagates
@@ -31,25 +31,21 @@ func requireRealFlake(t *testing.T) string {
 	return p
 }
 
-// copyFixture materialises testdata/fixture into dst (flake + a fresh .envrc),
-// so the real .direnv is built in a temp dir and the committed fixture stays
-// clean.
+// copyFixture materialises fixture into dst so the real .direnv is built in a
+// temp dir and the committed fixture stays clean.
 func copyFixture(t *testing.T, dst string) {
 	t.Helper()
 	if err := os.MkdirAll(dst, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	for _, f := range []string{"flake.nix", "flake.lock"} {
-		data, err := os.ReadFile(filepath.Join("testdata", "fixture", f))
+	for _, f := range []string{".envrc", "flake.nix", "flake.lock"} {
+		data, err := os.ReadFile(filepath.Join("fixture", f))
 		if err != nil {
 			t.Fatalf("read fixture %s: %v", f, err)
 		}
 		if err := os.WriteFile(filepath.Join(dst, f), data, 0o644); err != nil {
 			t.Fatal(err)
 		}
-	}
-	if err := os.WriteFile(filepath.Join(dst, ".envrc"), []byte("use flake\n"), 0o644); err != nil {
-		t.Fatal(err)
 	}
 }
 

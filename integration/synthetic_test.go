@@ -1,4 +1,4 @@
-package main
+package integration
 
 // Tier B: synthetic, nix-free integration. Drives real podman with
 // the generic device + a fabricated "project" (a fake prefix tool, a

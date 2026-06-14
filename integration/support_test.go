@@ -1,4 +1,4 @@
-package main
+package integration
 
 // Shared helpers for the integration tiers (B: synthetic/nix-free, C:
 // real-flake). All container tests skip under -short or when the runtime is
@@ -42,7 +42,7 @@ func build(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
 	bin := filepath.Join(dir, "nix-direnv-cdi")
-	out, err := exec.Command("go", "build", "-o", bin, ".").CombinedOutput()
+	out, err := exec.Command("go", "build", "-o", bin, "..").CombinedOutput()
 	if err != nil {
 		t.Fatalf("go build: %v\n%s", err, out)
 	}
