@@ -116,6 +116,10 @@ shell decides which dev-shell, at run time.
   design decisions, security, limitations, internals.
 - **[AGENTS.md](AGENTS.md)** — orientation for AI agents working in this repo.
 
+## License
+
+Licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE).
+
 ## Disclaimer
 
 nix-direnv-cdi is an independent project and is not affiliated with or endorsed
