@@ -15,6 +15,24 @@ wherever the hook holds `CAP_SYS_ADMIN` in the userns owning the container's
 mount ns — i.e. every real podman/docker configuration. See
 [gotchas.md](gotchas.md) for why bare rootless runc is the lone exception.
 
+> **Docker** must have CDI enabled — on by default since Docker 28.3 (opt-in via
+> the `cdi` feature in 25.0–28.1). Podman supports CDI out of the box.
+
+## Troubleshooting
+
+**The device is attached but nothing happens** (the container runs, but the
+dev-shell isn't there):
+
+- **Are you in the loaded dev-shell?** `echo $DIRENV_DIR` must be non-empty — if
+  it's empty the gate is closed *by design* (see [security.md](security.md)).
+- **Using `sudo`?** Add `-E` (`sudo` strips `DIRENV_DIR`/`DIRENV_DIFF`).
+- **Did `gen` run?** `.direnv/cdi/mounts.json` must exist and be current — re-run
+  `nix-direnv-cdi gen`, or reload direnv.
+- **Is the device found?** Run `nix-direnv-cdi install` once, or pass
+  `--cdi-spec-dir ~/.config/cdi` explicitly.
+- **Still stuck?** Set `NDC_HOOK_LOG=/tmp/ndc-hook.log` in the launching
+  environment and read the hook's trace (gate decision, mounts, `DIRENV_DIFF`).
+
 ## Limitations
 
 - **T9 — absolute path into the read-only store is not made additive.** If the

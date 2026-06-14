@@ -41,7 +41,9 @@ contrib/use_cdi.sh      # optional direnvrc `use cdi` helper
 
 - **`install`** — write the generic device to `~/.config/cdi/nix-direnv.json`
   (hook `path` = the installed binary) and register that directory with podman
-  (`containers.conf.d` drop-in) and docker (`daemon.json`). One-time per machine.
+  (`containers.conf.d` drop-in) and docker (`daemon.json`) — backing up any
+  existing config first and printing the manual steps if it can't apply them
+  (e.g. docker's root-owned `daemon.json`). One-time per machine.
 - **`gen`** — resolve the gcroot under `.direnv/flake-profile-*`, walk the
   closure (`nix-store -qR`), write `.direnv/cdi/mounts.json`, and report the
   constant device reference. Needs no `DIRENV_DIFF`, so it runs inside
@@ -58,6 +60,7 @@ contrib/use_cdi.sh      # optional direnvrc `use cdi` helper
 |----------|-------------|----------|
 | `~/.config/cdi/nix-direnv.json` | `install` | the one generic device (hook only) |
 | `<project>/.direnv/cdi/mounts.json` | `gen` | `{"closure": ["/nix/store/…", …]}` |
+
 ## See also
 
 - [mechanisms.md](mechanisms.md) — how the hook actually injects mounts and PATH.

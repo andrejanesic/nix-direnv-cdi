@@ -16,7 +16,7 @@ nix-direnv-cdi install
 
 ```
 use flake                       # nix-direnv materialises .direnv/flake-profile-* (the gcroot)
-eval "$(nix-direnv-cdi gen)"
+nix-direnv-cdi gen
   ├─ gcroot ──nix-store -qR──▶ closure  ──▶ .direnv/cdi/mounts.json   {"closure":[…]}
   └─ device ref to attach (constant): nix-direnv.cdi/shell=devshell
 ```

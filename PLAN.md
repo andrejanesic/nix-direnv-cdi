@@ -163,7 +163,7 @@ Plus the new, dynamic-design behaviours:
   - Mounts are file- or dir-typed to match the source; read-only is **best-effort** (rootless refuses the ro-remount; store paths are immutable `0555`).
 - **✅ R5. Tier B** — synthetic, nix-free dynamic-mount + gate matrix on podman.
 - **✅ R6. Tier C** — real-flake end-to-end (`install`/`gen`/`--device`, hello propagates, PATH additive).
-- **✅ R7. direnv integration + docs** — `.envrc` snippet (`use flake`; `eval "$(nix-direnv-cdi gen)"`) and the `contrib/use_cdi.sh` `use cdi` helper (both verified to run inside `.envrc`); `gen` stdout made eval-clean; README. **Deferred:** the real moby+CDI smoke test (this environment's `docker` is a podman shim).
+- **✅ R7. direnv integration + docs** — `.envrc` snippet (`use flake`; `nix-direnv-cdi gen`) and the `contrib/use_cdi.sh` `use cdi` helper (both verified to run inside `.envrc`); README + `docs/`. The `$DIRENV_CDI` convenience variable was later removed (nothing read it): `gen` just writes `mounts.json`, and the device ref is the constant `nix-direnv.cdi/shell=devshell`. **Deferred:** the real moby+CDI smoke test (this environment's `docker` is a podman shim).
 - **✅ Cleanup** — `fingerprint`, placement modes, and the static Tier A/B/C tests removed (in R2/R3).
 
 ---
