@@ -106,12 +106,12 @@ shell decides which dev-shell, at run time.
   Dev-shell env (incl. secrets) is read live and **never written to disk**.
 - **Runtimes.** Verified on rootless **podman** (crun) and **runc**; supported on
   rootful podman and docker (rootless/rootful). One non-goal: bare rootless
-  `runc` with an unprivileged invoker. See [docs/caveats.md](docs/caveats.md).
+  `runc` with an unprivileged invoker. See [docs/limitations.md](docs/limitations.md).
 - **Limitation (T9).** An absolute path *into* the read-only store runs but isn't
   made additive — run dev-shell tools by name.
 
 ## Documentation
 
-- **[docs/](docs/readme.md)** — architecture, mechanisms, data flow, design
-  decisions, security, gotchas, caveats.
+- **[docs/](docs/readme.md)** — architecture, mechanisms (incl. data flow),
+  design decisions, security, limitations, internals.
 - **[AGENTS.md](AGENTS.md)** — orientation for AI agents working in this repo.

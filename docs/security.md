@@ -65,5 +65,6 @@ approved environment, nothing is exposed.
 
 ## See also
 
-- [caveats.md](caveats.md) — limitations and non-goals.
-- [gotchas.md](gotchas.md) — the low-level behaviours behind the above.
+- [limitations.md](limitations.md) — limitations, runtime support, and non-goals.
+- [internals.md](internals.md) — the low-level behaviours behind the above (e.g.
+  why the read-only remount is best-effort under rootless).

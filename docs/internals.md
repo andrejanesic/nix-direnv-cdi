@@ -1,7 +1,10 @@
-# Gotchas & load-bearing hacks
+# Internals & load-bearing hacks
 
-The non-obvious, hard-won details the implementation depends on. Each was a real
-trap; several were only caught by running against a live runtime.
+**For maintainers — read this before changing the hook or `nsmount`.** The
+non-obvious, hard-won kernel/Go details the implementation depends on. Each was a
+real trap; several were only caught by running against a live runtime. (For
+user-facing limitations and runtime support, see
+[limitations.md](limitations.md).)
 
 ## `CLONE_FS` → `setns(CLONE_NEWNS)` EINVAL (the Go trap)
 
@@ -18,16 +21,17 @@ thread in the host namespace. Without the `unshare`, the mount silently fails.
 always multithreaded, so the userns-entry fallback (needed only for *bare
 rootless runc with an unprivileged invoker*) cannot be done in pure Go — it would
 need an `nsexec`-style C constructor that runs before the Go runtime starts.
-That configuration is a [non-goal](caveats.md#non-goals); the hook no-ops there.
+That configuration is a [non-goal](limitations.md#non-goals); the hook no-ops there.
 Every real podman/docker config needs only mount-ns entry.
 
 ## Host-side mounts don't propagate; you must enter the container's mount ns
 
 A bind mount the hook performs in the **host** mount namespace does not appear
-inside the container (its mount ns is private/slave). Only file/dir *writes* into
-the rootfs propagate. So the closure must be mounted from *inside* the
-container's mount ns (via the `pid` from the OCI State). Source paths are
-reachable there pre-`pivot_root`, and mounts under `root.path` survive it.
+inside the container (its mount ns is private/slave) — only file/dir *writes*
+into the rootfs propagate. So the closure must be bind-mounted from *inside* the
+container's mount ns, via the `pid` from the OCI State. (The propagation and
+`pivot_root` mechanics are in
+[mechanisms.md](mechanisms.md#2-dynamic-mount-injection-the-closure).)
 
 ## Some closure paths are files, not directories
 

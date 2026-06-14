@@ -107,7 +107,7 @@ func Validate(spec *specs.Spec) error {
 
 // Write validates the spec, then serialises it to dir/FileName (0644). It
 // ensures dir is traversable (>=0755) so rootless podman can resolve it
-// (see docs/gotchas.md). The JSON comes from the specs-go struct tags.
+// (see docs/internals.md). The JSON comes from the specs-go struct tags.
 func Write(spec *specs.Spec, dir string) error {
 	if err := Validate(spec); err != nil {
 		return err

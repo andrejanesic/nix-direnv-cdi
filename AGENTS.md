@@ -44,7 +44,7 @@ bare runner.
 ## Invariants to respect before editing
 
 These are load-bearing; breaking them silently breaks the tool. Full detail in
-[docs/gotchas.md](docs/gotchas.md).
+[docs/internals.md](docs/internals.md).
 
 - **The hook must always exit 0.** A non-zero `createRuntime` hook aborts the
   container. Everything in `hook`/`nsmount` is best-effort.

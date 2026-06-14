@@ -2,8 +2,8 @@
 
 Why the tool is shaped the way it is. Each decision records the alternative(s)
 rejected and why. The empirical findings behind these choices are distilled in
-[gotchas.md](gotchas.md) and [caveats.md](caveats.md); the original design
-exploration is preserved in the git history.
+[internals.md](internals.md) and [limitations.md](limitations.md); the original
+design exploration is preserved in the git history.
 
 ## D1 — One generic device, not one per project
 
@@ -40,8 +40,9 @@ We surveyed every way to get the closure into the container:
 | Mount-propagation trick (`rshared` parent) | ✗ fragile; defeated by `rprivate` defaults + rootless isolation |
 | A custom runtime shim (NVIDIA JIT-CDI style) | ✗ heavier; we stay on standard CDI hooks |
 
-Entering the container's mount namespace is exactly how NVIDIA's
-`libnvidia-container` injects its mounts — solid prior art.
+The chosen approach has solid prior art: entering the container's mount namespace
+is exactly how NVIDIA's `libnvidia-container` injects its mounts (mechanics in
+[mechanisms.md](mechanisms.md#2-dynamic-mount-injection-the-closure)).
 
 ## D4 — Gate on being in the loaded dev-shell
 
@@ -76,4 +77,5 @@ possible.
 
 D1–D6 compose into: **one generic device + a hook that reads the live dev-shell
 and a pre-computed closure**. The device says "a dev-shell"; the launching shell
-says "which one", at run time. See [data-flow.md](data-flow.md).
+says "which one", at run time. See [mechanisms.md](mechanisms.md) for how that
+plays out end to end.

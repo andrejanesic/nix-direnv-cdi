@@ -19,7 +19,8 @@ nothing baked.
 
 The slow, project-specific part (the closure) is produced ahead of time by
 `gen`; the dynamic part (which closure, what `PATH`/env) is resolved by the hook
-at run time from the live environment. See [data-flow.md](data-flow.md).
+at run time from the live environment. See [mechanisms.md](mechanisms.md) for the
+end-to-end timeline.
 
 ## Components
 
@@ -63,6 +64,6 @@ contrib/use_cdi.sh      # optional direnvrc `use cdi` helper
 
 ## See also
 
-- [mechanisms.md](mechanisms.md) — how the hook actually injects mounts and PATH.
-- [data-flow.md](data-flow.md) — the end-to-end timeline.
+- [mechanisms.md](mechanisms.md) — how the hook injects mounts and PATH, plus
+  the end-to-end timeline.
 - [design-decisions.md](design-decisions.md) — why it's shaped this way.

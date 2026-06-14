@@ -5,20 +5,21 @@ top-level [README](../README.md).
 
 ## Contents
 
-| Doc | What it covers |
-|-----|----------------|
-| [architecture.md](architecture.md) | The big picture: the generic-device model, components, subcommands, and artifacts. |
-| [mechanisms.md](mechanisms.md) | How it works at run time: the CDI hook, dynamic mount injection (ns-entry), and additive `PATH` wrapping. |
-| [data-flow.md](data-flow.md) | End-to-end timeline (setup → generate → inject) and what data lives where. |
-| [design-decisions.md](design-decisions.md) | Why it's shaped this way, with the alternatives considered and rejected. |
-| [security.md](security.md) | The authorization model (the gate), exposure surface, read-only mounts, and secrets handling. |
-| [gotchas.md](gotchas.md) | The non-obvious, load-bearing tricks and kernel/Go traps the implementation depends on. |
-| [caveats.md](caveats.md) | Limitations, non-goals, the runtime support matrix, and deferred verification. |
+| Doc | Audience | What it covers |
+|-----|----------|----------------|
+| [architecture.md](architecture.md) | everyone | The big picture: the generic-device model, components, subcommands, and artifacts. |
+| [mechanisms.md](mechanisms.md) | everyone | How it works end to end: the CDI hook, dynamic mount injection (ns-entry), additive `PATH`, and the full setup→generate→inject timeline. |
+| [design-decisions.md](design-decisions.md) | everyone | Why it's shaped this way, with the alternatives considered and rejected. |
+| [security.md](security.md) | users | The authorization model (the gate), exposure surface, read-only mounts, and secrets handling. |
+| [limitations.md](limitations.md) | users | Limitations, non-goals, the runtime support matrix, troubleshooting, and deferred verification. |
+| [internals.md](internals.md) | maintainers | The non-obvious, load-bearing kernel/Go traps the implementation depends on. |
 
 ## Suggested reading order
 
 1. **[architecture.md](architecture.md)** — start here for the shape of the system.
-2. **[mechanisms.md](mechanisms.md)** + **[data-flow.md](data-flow.md)** — how it actually runs.
+2. **[mechanisms.md](mechanisms.md)** — how it actually runs, end to end.
 3. **[design-decisions.md](design-decisions.md)** — why, and what was rejected.
-4. **[security.md](security.md)** + **[caveats.md](caveats.md)** — the model and its edges.
-5. **[gotchas.md](gotchas.md)** — read before changing the hook or `nsmount`.
+4. **[security.md](security.md)** + **[limitations.md](limitations.md)** — the
+   model and its edges (user-facing).
+5. **[internals.md](internals.md)** — read before changing the hook or `nsmount`
+   (maintainer-facing).

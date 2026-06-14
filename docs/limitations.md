@@ -1,4 +1,8 @@
-# Caveats, limitations & runtime support
+# Limitations, runtime support & troubleshooting
+
+**For users.** Where the tool runs, what it deliberately doesn't do, and how to
+diagnose it when nothing happens. (For the kernel/Go internals behind these
+edges, see [internals.md](internals.md).)
 
 ## Runtime support
 
@@ -13,7 +17,7 @@
 The shipped hook does **mount-namespace-only** entry, which is sufficient
 wherever the hook holds `CAP_SYS_ADMIN` in the userns owning the container's
 mount ns — i.e. every real podman/docker configuration. See
-[gotchas.md](gotchas.md) for why bare rootless runc is the lone exception.
+[internals.md](internals.md) for why bare rootless runc is the lone exception.
 
 > **Docker** must have CDI enabled — on by default since Docker 28.3 (opt-in via
 > the `cdi` feature in 25.0–28.1). Podman supports CDI out of the box.
@@ -42,7 +46,8 @@ dev-shell isn't there):
   **Mitigation:** run dev-shell tools by name, not by absolute store path.
 - **Read-only is best-effort under rootless.** The ro-remount is refused in a
   rootless user namespace; the bind is read-write, but store paths are immutable
-  `0555` so they're effectively read-only. Rootful gets true read-only.
+  `0555` so they're effectively read-only. Rootful gets true read-only. (Why:
+  [internals.md](internals.md).)
 - **Freshness.** The closure is captured at `gen` time. If you change
   dependencies, re-run `gen` (a direnv reload does this automatically) so
   `mounts.json` matches the dev-shell.
@@ -51,9 +56,8 @@ dev-shell isn't there):
   but isn't part of the mounted closure, so tools there won't resolve in the
   container. The common case (store `bin` dirs) is covered.
 - **No workdir mount.** Project sources aren't mounted; add `-v $PWD:$PWD`.
-- **`sudo` strips the gate env.** `sudo podman run …` loses
-  `DIRENV_DIR`/`DIRENV_DIFF` → device inert. Use `sudo -E`. See
-  [security.md](security.md).
+- **`sudo` strips the gate env** → device inert; use `sudo -E`. See the
+  Troubleshooting note above and [security.md](security.md) for why.
 
 ## Non-goals
 
@@ -63,7 +67,7 @@ dev-shell isn't there):
   on standard, cross-runtime CDI hooks.
 - **Bare rootless `runc` with an unprivileged invoker.** Would require a C
   `nsexec` constructor for the user-namespace entry that pure Go can't perform
-  (see [gotchas.md](gotchas.md)). The hook degrades gracefully there. Not a
+  (see [internals.md](internals.md)). The hook degrades gracefully there. Not a
   target, since it isn't how podman or docker run.
 - **Non-host-accessible prefixes.** The mechanism assumes the dev-shell prefix is
   host-accessible bind-mountable paths (true for nix store closures).
