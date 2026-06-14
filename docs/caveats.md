@@ -53,6 +53,6 @@ mount ns — i.e. every real podman/docker configuration. See
 ## Deferred verification
 
 - **Real Docker/moby end-to-end.** Docker's runtime is runc, which is verified
-  directly; a one-off `docker run --device "$DIRENV_CDI" …` on a host with
+  directly; a one-off `docker run --device nix-direnv.cdi/shell=devshell …` on a host with
   genuine moby + CDI enabled would close the loop. (The development environment's
   `docker` is a podman shim, so this can't be run there.)

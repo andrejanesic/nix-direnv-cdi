@@ -4,14 +4,14 @@
 
 A small **Go** program that makes a project's **nix-direnv dev-shell** available inside **any OCI container** (podman, docker) via **one generic CDI device** you attach with a single `--device`. The device carries *no* project data; a `createRuntime` hook injects the dev-shell **dynamically at container-creation time** from the **loaded direnv environment it inherits**. One device serves every project — nothing per-project is registered.
 
-You attach it with: `podman run --device nix-direnv.cdi/shell=devshell <image> <cmd>` (the ref is a constant, exported as `$DIRENV_CDI`).
+You attach it with: `podman run --device nix-direnv.cdi/shell=devshell <image> <cmd>` (the ref is the constant `nix-direnv.cdi/shell=devshell` — the same for every project).
 
 > **Architecture pivot (2026-06-14).** This supersedes the original *static* design — one baked CDI spec per project, named by a fingerprint, carrying the closure mounts + dev-shell env in the spec. That design worked and was fully tested (old milestones 1–8), but it meant **N projects → N registered devices**, which we did not want. We pivoted to a **single generic device + a dynamic hook** after empirically verifying (see §1) that a `createRuntime` hook can inject the closure mounts at run time by entering the container's mount namespace. The git history retains the static implementation; this plan describes the refactor to the dynamic design.
 
 **End-to-end flow (the simplified model):**
 1. **Once per machine:** `nix-direnv-cdi install` — registers the one generic device with podman/docker.
-2. **Per project** (in `.envrc`, right after `use flake`): `nix-direnv-cdi gen` writes `.direnv/cdi/mounts.json` (the closure) and exports the constant `DIRENV_CDI=nix-direnv.cdi/shell=devshell`. Re-runs automatically on every direnv reload, so it stays fresh as dependencies change.
-3. **Run** (from the loaded dev-shell): `podman run --device "$DIRENV_CDI" <image> <cmd>` → the hook gates on `DIRENV_DIR`, bind-mounts the project's closure into the container (read-only), and makes `PATH`/env additive. Outside the loaded shell the device is **inert**.
+2. **Per project** (in `.envrc`, right after `use flake`): `nix-direnv-cdi gen` writes `.direnv/cdi/mounts.json` (the closure). The device ref is the constant `nix-direnv.cdi/shell=devshell`. Re-runs automatically on every direnv reload, so it stays fresh as dependencies change.
+3. **Run** (from the loaded dev-shell): `podman run --device nix-direnv.cdi/shell=devshell <image> <cmd>` → the hook gates on `DIRENV_DIR`, bind-mounts the project's closure into the container (read-only), and makes `PATH`/env additive. Outside the loaded shell the device is **inert**.
 
 ---
 
@@ -75,7 +75,7 @@ A **single** device, identical for every project, written to `~/.config/cdi/nix-
 ```
 
 - **No `env`, no `mounts`, no fingerprint.** The device only installs the hook.
-- Reference: `--device nix-direnv.cdi/shell=devshell`; exported as `$DIRENV_CDI` (a **constant** for all projects).
+- Reference: `--device nix-direnv.cdi/shell=devshell` (a **constant** for all projects).
 - The hook `path` resolves to the installed binary via `os.Executable()` (immutable nix-store path when installed via the flake — see packaging).
 
 **Per-project data** (written by `gen`, *not* registered, gitignored): `<project>/.direnv/cdi/mounts.json` — the closure path list the hook mounts.
@@ -101,7 +101,7 @@ nix-direnv-cdi/
 
 **Subcommands**
 - `install` — write the single generic CDI device to `~/.config/cdi` (hook `path` = installed binary; dir chmod `0755`) and register the dir in podman's `containers.conf.d` drop-in and docker's `daemon.json` (existing backup-then-auto logic, with manual-instructions fallback). One-time.
-- `gen` — resolve the gcroot from `.direnv/flake-profile-*`, compute the closure (`nix-store -qR`), write `<project>/.direnv/cdi/mounts.json`; print the constant `$DIRENV_CDI`. **Runs inside `.envrc`** after `use flake` (no `DIRENV_DIFF` needed). Re-run when dependencies change (a direnv reload does this automatically).
+- `gen` — resolve the gcroot from `.direnv/flake-profile-*`, compute the closure (`nix-store -qR`), write `<project>/.direnv/cdi/mounts.json`; report the constant device ref. **Runs inside `.envrc`** after `use flake` (no `DIRENV_DIFF` needed). Re-run when dependencies change (a direnv reload does this automatically).
 - `hook` — the `createRuntime` hook. Best-effort, always exit 0:
   1. **Gate:** read `DIRENV_DIR` from the inherited env. Absent → exit 0 (no-op; the device is inert outside an approved shell).
   2. **Mounts:** read `<DIRENV_DIR>/.direnv/cdi/mounts.json` — the **closure only**; the old design's `rw` project-root/workdir mount is **dropped** (mount your sources yourself with `-v $PWD:$PWD` if you want them). For each closure path, enter the container's mount ns (try `setns(mnt)`; on `EPERM`, `setns(user)`+`setns(mnt)`) and bind it **read-only** onto `<rootfs><path>` (mkdir the target first). `DIRENV_DIR` carries direnv's leading `-` marker, which is stripped before use.
@@ -148,7 +148,7 @@ Plus the new, dynamic-design behaviours:
 - Register the generic device; fabricate a fake "project": a temp dir with a fake prefix tool, a `mounts.json` pointing at it, and a synthetic `DIRENV_DIR`/`DIRENV_DIFF` in the env. `podman run --device …` → the fake tool runs inside the container (dynamic mount + additive PATH). Includes the **gate** test (no `DIRENV_DIR` → inert) and the T1–T10 matrix.
 
 **Tier C — real-flake smoke (nix-gated)**
-- Committed `testdata/fixture` (`flake.nix` providing `hello`, `.envrc` with `use flake` + `gen`). `install` the generic device, then `direnv exec <fixture> -- podman run --device "$DIRENV_CDI" busybox hello` → `Hello, world!`, `PATH` additive; control without the device shows `hello` absent.
+- Committed `testdata/fixture` (`flake.nix` providing `hello`, `.envrc` with `use flake` + `gen`). `install` the generic device, then `direnv exec <fixture> -- podman run --device nix-direnv.cdi/shell=devshell busybox hello` → `Hello, world!`, `PATH` additive; control without the device shows `hello` absent.
 
 **Deferred:** a real **moby+CDI** end-to-end (`docker run --device`) on a host with real Docker — the runtime-level behaviour is already verified on runc.
 
@@ -157,7 +157,7 @@ Plus the new, dynamic-design behaviours:
 ## 6. Milestones (refactor)
 
 - **✅ R1. PLAN rewrite** — this document.
-- **✅ R2+R4. Producer side** — `cdispec.Build` produces the one generic device (hook only); `install` writes+registers it (hook `path` = the installed binary); `gen` writes the closure to `.direnv/cdi/mounts.json` from the gcroot (no `DIRENV_DIFF`, runnable in `.envrc`) and prints the constant `$DIRENV_CDI`. Combined because the new `gen` no longer touches `cdispec`. `fingerprint`/placement modes deleted. Tier A.
+- **✅ R2+R4. Producer side** — `cdispec.Build` produces the one generic device (hook only); `install` writes+registers it (hook `path` = the installed binary); `gen` writes the closure to `.direnv/cdi/mounts.json` from the gcroot (no `DIRENV_DIFF`, runnable in `.envrc`) and reports the constant device ref. Combined because the new `gen` no longer touches `cdispec`. `fingerprint`/placement modes deleted. Tier A.
 - **✅ R3. `nsmount` + `hook`** — `hook` gates on `DIRENV_DIR`, injects the closure via `nsmount`, and wraps the entrypoint for additive `PATH` + dev-shell env from the inherited `DIRENV_DIFF`. `NDC_HOOK_LOG` enables opt-in debug logging.
   - **`nsmount` does mount-ns-only entry** (`unshare(CLONE_FS)` — required, since Go runtime threads share `CLONE_FS` and that makes `setns(CLONE_NEWNS)` fail `EINVAL` — then `setns(CLONE_NEWNS)` + bind, on a dedicated locked-and-discarded thread). This covers **every real configuration**: rootless podman/crun (verified), rootful podman/root, rootful docker, and rootless docker (RootlessKit). **Bare rootless runc with an unprivileged invoker is out of scope** (§7): there `setns(CLONE_NEWNS)` returns `EPERM` and the only fix is a `CLONE_NEWUSER` entry, which pure Go can't do (multithreaded `setns(CLONE_NEWUSER)` is disallowed — would need an `nsexec`-style C constructor). The hook degrades gracefully there: the mount is skipped (best-effort) and the container still runs without the dev-shell. The userns fallback is verified feasible via `nsenter`, should we ever want that target.
   - Mounts are file- or dir-typed to match the source; read-only is **best-effort** (rootless refuses the ro-remount; store paths are immutable `0555`).

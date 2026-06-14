@@ -17,8 +17,7 @@ import (
 )
 
 // Spec identity (PLAN §2). There is exactly one device, named Device, for all
-// projects; Ref is the constant reference users pass to --device (exported as
-// $DIRENV_CDI).
+// projects; Ref is the constant reference users pass to --device.
 const (
 	Vendor = "nix-direnv.cdi"
 	Class  = "shell"

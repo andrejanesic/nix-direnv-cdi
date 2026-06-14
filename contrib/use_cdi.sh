@@ -7,10 +7,10 @@
 #     use flake
 #     use cdi
 #
-# `use cdi` writes the dev-shell's closure to .direnv/cdi/mounts.json and exports
-# $DIRENV_CDI, so you can attach the dev-shell to a container with:
+# `use cdi` writes the dev-shell's closure to .direnv/cdi/mounts.json. Attach the
+# dev-shell to a container with the constant device reference:
 #
-#     podman run --device "$DIRENV_CDI" <image> <cmd>
+#     podman run --device nix-direnv.cdi/shell=devshell <image> <cmd>
 #
 # It only needs the materialised .direnv gcroot (created by `use flake`), not
 # DIRENV_DIFF, so it is safe to run during .envrc evaluation. Best-effort: if
@@ -20,5 +20,5 @@ use_cdi() {
     log_error "use cdi: nix-direnv-cdi not on PATH; skipping"
     return 0
   fi
-  eval "$(nix-direnv-cdi gen "$@")" || log_error "use cdi: gen failed; skipping"
+  nix-direnv-cdi gen "$@" >/dev/null || log_error "use cdi: gen failed; skipping"
 }

@@ -25,7 +25,7 @@ Usage:
   nix-direnv-cdi <command> [flags]
 
 Commands:
-  gen        Write the project's closure to .direnv/cdi/mounts.json; print $DIRENV_CDI
+  gen        Write the project's dev-shell closure to .direnv/cdi/mounts.json
   hook       createRuntime hook: inject the dev-shell into the container (best-effort)
   install    Register the generic CDI device with podman/docker (one-time)
   version    Print version information
@@ -67,9 +67,9 @@ func exitOnErr(err error) {
 
 // cmdGen computes the project's dev-shell closure and writes it to
 // <project>/.direnv/cdi/mounts.json (the data the runtime hook bind-mounts),
-// then prints the constant device reference + the eval-able export. It needs
-// only the gcroot (not DIRENV_DIFF), so it is safe to run inside `.envrc` right
-// after `use flake`. (PLAN §3 "gen".)
+// then reports the constant device reference to attach. It needs only the
+// gcroot (not DIRENV_DIFF), so it is safe to run inside `.envrc` right after
+// `use flake`. (PLAN §3 "gen".)
 func cmdGen(args []string) error {
 	fs := flag.NewFlagSet("gen", flag.ContinueOnError)
 	out := fs.String("out", "", "output dir for mounts.json (default: <project>/.direnv/cdi)")
@@ -95,11 +95,12 @@ func cmdGen(args []string) error {
 		return err
 	}
 
-	// Human-readable status (incl. the device ref) to stderr so stdout stays
-	// eval-clean: `eval "$(nix-direnv-cdi gen)"` sets $DIRENV_CDI and nothing else.
-	fmt.Fprintf(os.Stderr, "nix-direnv-cdi: wrote %d closure paths -> %s (device %s)\n",
+	// Status to stderr; gen has no stdout. The device reference is the constant
+	// cdispec.Ref — the same for every project.
+	fmt.Fprintf(os.Stderr,
+		"nix-direnv-cdi: wrote %d closure paths -> %s\n"+
+			"  attach with: podman run --device %s <image> <cmd>\n",
 		len(closure), path, cdispec.Ref)
-	fmt.Printf("export DIRENV_CDI=%s\n", cdispec.Ref)
 	return nil
 }
 

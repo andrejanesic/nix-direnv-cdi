@@ -1,6 +1,9 @@
 /.direnv/
 /testdata/fixture/.direnv/
 /**/*.un~
+# editor swap files
+*.swp
+*.swo
 
 # Go / nix build output
 /nix-direnv-cdi

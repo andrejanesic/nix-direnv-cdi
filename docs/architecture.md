@@ -43,8 +43,8 @@ contrib/use_cdi.sh      # optional direnvrc `use cdi` helper
   (hook `path` = the installed binary) and register that directory with podman
   (`containers.conf.d` drop-in) and docker (`daemon.json`). One-time per machine.
 - **`gen`** — resolve the gcroot under `.direnv/flake-profile-*`, walk the
-  closure (`nix-store -qR`), write `.direnv/cdi/mounts.json`, and print the
-  constant `export DIRENV_CDI=…`. Needs no `DIRENV_DIFF`, so it runs inside
+  closure (`nix-store -qR`), write `.direnv/cdi/mounts.json`, and report the
+  constant device reference. Needs no `DIRENV_DIFF`, so it runs inside
   `.envrc` right after `use flake`.
 - **`hook`** — the `createRuntime` hook (invoked by the runtime, not by you).
   Gates on `DIRENV_DIR`, injects the closure via `nsmount`, and wraps the
@@ -58,8 +58,6 @@ contrib/use_cdi.sh      # optional direnvrc `use cdi` helper
 |----------|-------------|----------|
 | `~/.config/cdi/nix-direnv.json` | `install` | the one generic device (hook only) |
 | `<project>/.direnv/cdi/mounts.json` | `gen` | `{"closure": ["/nix/store/…", …]}` |
-| `$DIRENV_CDI` | `gen` | the constant ref `nix-direnv.cdi/shell=devshell` |
-
 ## See also
 
 - [mechanisms.md](mechanisms.md) — how the hook actually injects mounts and PATH.

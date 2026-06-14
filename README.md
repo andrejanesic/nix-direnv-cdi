@@ -8,7 +8,7 @@ that dev-shell **into any OCI container** — no Dockerfile, no `apt-get`, no
 rebuilding images — by attaching a single CDI device:
 
 ```sh
-podman run --device "$DIRENV_CDI" <any-image> <your-tool>
+podman run --device nix-direnv.cdi/shell=devshell <any-image> <your-tool>
 ```
 
 One generic device serves every project. The right dev-shell is chosen
@@ -21,7 +21,7 @@ automatically, at run time, from the direnv environment you're already in.
 **The proof — a tool that exists only in your dev-shell, running in a stock image:**
 
 ```console
-$ podman run --device "$DIRENV_CDI" busybox hello
+$ podman run --device nix-direnv.cdi/shell=devshell busybox hello
 Hello, world!          # ← `hello` came from your dev-shell, not from busybox
 ```
 
@@ -29,7 +29,7 @@ Hello, world!          # ← `hello` came from your dev-shell, not from busybox
 dev-shell; `alpine` doesn't ship it:
 
 ```sh
-podman run --device "$DIRENV_CDI" -v "$PWD:$PWD" -w "$PWD" alpine \
+podman run --device nix-direnv.cdi/shell=devshell -v "$PWD:$PWD" -w "$PWD" alpine \
   go test ./...
 ```
 
@@ -66,16 +66,18 @@ nix run github:andrejanesic/nix-direnv-cdi -- install
 
 ```sh
 use flake
-eval "$(nix-direnv-cdi gen)"      # writes .direnv/cdi/mounts.json, exports $DIRENV_CDI
+nix-direnv-cdi gen               # writes .direnv/cdi/mounts.json
 ```
 
 (or copy [`contrib/use_cdi.sh`](contrib/use_cdi.sh) into `~/.config/direnv/direnvrc`
 and just write `use flake` then `use cdi`.)
 
+The device reference is always the constant `nix-direnv.cdi/shell=devshell`.
+
 **3. Run anything with your dev-shell attached:**
 
 ```sh
-podman run --device "$DIRENV_CDI" <image> <cmd>
+podman run --device nix-direnv.cdi/shell=devshell <image> <cmd>
 ```
 
 ---
