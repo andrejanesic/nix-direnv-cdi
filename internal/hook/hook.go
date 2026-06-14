@@ -1,12 +1,15 @@
-// Package hook implements the createRuntime OCI hook that wraps the container
-// entrypoint so the dev-shell prefix is prepended to PATH additively. The hook
-// runs in the host namespace after the mount namespace and mounts exist, the
-// one stage that can both read config.json and write the final rootfs. See
-// PLAN.md §1 for the entrypoint-resolution algorithm and its limitations.
+// Package hook implements the createRuntime OCI hook. The hook runs in the host
+// namespace after the container's mount namespace and mounts exist; from there
+// it (1) bind-mounts the project's dev-shell closure into the container by
+// entering the container's mount namespace, and (2) wraps the entrypoint so the
+// dev-shell prefix is prepended to PATH additively and the dev-shell env vars
+// are exported. Everything it needs is read at run time from the inherited
+// loaded-direnv environment (DIRENV_DIR, DIRENV_DIFF) plus the project's
+// .direnv/cdi/mounts.json. See PLAN.md §1/§3.
 //
-// This is a faithful port of the proven bash MVP (../cdi-additive-test.sh,
-// lines 24-82, 13/13). The algorithm and the documented T9 limitation are
-// preserved verbatim; only the accidental bash/jq complexity is eliminated.
+// The entrypoint-wrap algorithm and its T9 limitation are the proven port of
+// the bash MVP (../cdi-additive-test.sh); the dynamic mount injection is the
+// dynamic-design addition.
 package hook
 
 import (
@@ -14,24 +17,28 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	oci "github.com/opencontainers/runtime-spec/specs-go"
 
+	"github.com/andrejanesic/nix-direnv-cdi/internal/devshell"
+	"github.com/andrejanesic/nix-direnv-cdi/internal/nsmount"
 	"github.com/andrejanesic/nix-direnv-cdi/internal/ociconfig"
 )
 
-// Run executes the createRuntime hook:
-//
-//  1. read the OCI container State from stdin (yields the bundle path),
-//  2. load <bundle>/config.json,
-//  3. resolve the rootfs (root.path; relative -> joined onto the bundle),
-//  4. wrap the entrypoint (wrapEntrypoint) so the dev-shell prefix is prepended
-//     to PATH before exec'ing the real entrypoint.
-//
-// It is best-effort: the caller ignores the returned error and exits 0 so the
-// container is never broken. Every "nothing to wrap" condition returns nil; an
-// error is reserved for a genuine I/O failure mid-wrap (which the caller logs).
+// mountFunc injects the closure into the container's mount namespace. Injected
+// so the testable core (run) can be exercised without a real container; the
+// production implementation is nsmount.BindAll.
+type mountFunc func(pid int, rootfs string, closure []string) error
+
+// getenvFunc mirrors os.LookupEnv (the hook's inherited environment).
+type getenvFunc func(string) (string, bool)
+
+// Run executes the createRuntime hook: read the OCI State from stdin, load
+// <bundle>/config.json, resolve the rootfs, then run the core. Best-effort: the
+// caller ignores the returned error and exits 0 so the container is never
+// broken.
 func Run(in io.Reader) error {
 	state, err := ociconfig.ReadState(in)
 	if err != nil {
@@ -41,47 +48,104 @@ func Run(in io.Reader) error {
 	if err != nil {
 		return err
 	}
-
-	// Resolve the rootfs: root.path may be absolute or relative to the bundle.
-	if spec.Root == nil {
-		return nil
-	}
-	rootfs := spec.Root.Path
+	rootfs := resolveRootfs(spec, state.Bundle)
 	if rootfs == "" {
 		return nil
 	}
-	if !filepath.IsAbs(rootfs) {
-		rootfs = filepath.Join(state.Bundle, rootfs)
-	}
-
-	return wrapEntrypoint(spec, rootfs)
+	return run(state, spec, rootfs, os.LookupEnv, nsmount.BindAll)
 }
 
-// wrapEntrypoint is the testable core of the hook (no container, no runtime).
-// It mirrors the MVP hook's case-split:
+// resolveRootfs returns the absolute rootfs path from config.json's root.path
+// (joined onto the bundle when relative), or "" if absent.
+func resolveRootfs(spec *oci.Spec, bundle string) string {
+	if spec.Root == nil || spec.Root.Path == "" {
+		return ""
+	}
+	rootfs := spec.Root.Path
+	if !filepath.IsAbs(rootfs) {
+		rootfs = filepath.Join(bundle, rootfs)
+	}
+	return rootfs
+}
+
+// run is the testable core (no real container). It gates on DIRENV_DIR (being
+// in a loaded dev-shell is the authorization), then injects the closure mounts
+// and wraps the entrypoint for additive PATH + dev-shell env. Best-effort: a
+// mount failure is logged but never blocks the wrap or breaks the container.
+func run(state *oci.State, spec *oci.Spec, rootfs string, getenv getenvFunc, mount mountFunc) error {
+	dbg := debugLog(getenv)
+
+	dirRaw, ok := getenv("DIRENV_DIR")
+	if !ok || dirRaw == "" {
+		dbg("gate closed: DIRENV_DIR unset; device inert")
+		return nil // not in an approved dev-shell -> the device is inert
+	}
+	project := strings.TrimPrefix(dirRaw, "-") // direnv's leading '-' marker
+	dbg("gate open: project=%s pid=%d rootfs=%s", project, state.Pid, rootfs)
+
+	// 1. Inject the project's closure mounts (best-effort).
+	closure, rerr := devshell.ReadMounts(filepath.Join(project, ".direnv", "cdi", "mounts.json"))
+	dbg("mounts.json: %d paths, readErr=%v", len(closure), rerr)
+	if rerr == nil && len(closure) > 0 && state.Pid > 0 {
+		if merr := mount(state.Pid, rootfs, closure); merr != nil {
+			dbg("mount FAILED: %v", merr)
+			fmt.Fprintln(os.Stderr, "nix-direnv-cdi hook: mount (ignored):", merr)
+		} else {
+			dbg("mount OK: %d paths bound under %s", len(closure), rootfs)
+		}
+	}
+
+	// 2. Additive PATH + dev-shell env via entrypoint wrapping.
+	prefix, env, has, derr := devshell.RuntimeEnv(getenv)
+	dbg("runtimeEnv: prefix=%d env=%d has=%v err=%v", len(prefix), len(env), has, derr)
+	if derr != nil {
+		return derr
+	}
+	if !has {
+		return nil
+	}
+	return wrapEntrypoint(spec, rootfs, prefix, env)
+}
+
+// debugLog returns a logger that appends to the file named by NDC_HOOK_LOG, or
+// a no-op when it is unset. A createRuntime hook is best-effort and silent, so
+// this is the only way to diagnose it.
+func debugLog(getenv getenvFunc) func(string, ...any) {
+	path, ok := getenv("NDC_HOOK_LOG")
+	if !ok || path == "" {
+		return func(string, ...any) {}
+	}
+	return func(format string, args ...any) {
+		f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+		if err != nil {
+			return
+		}
+		defer f.Close()
+		fmt.Fprintf(f, "nix-direnv-cdi hook: "+format+"\n", args...)
+	}
+}
+
+// wrapEntrypoint writes a shim that prepends prefix to PATH and exports the
+// dev-shell env vars before exec'ing the real entrypoint. It mirrors the MVP
+// case-split:
 //
-//   - absolute entry -> crun execs it directly, so wrap in place inside the
-//     writable rootfs (move the real aside, write a wrapper). An absolute path
-//     that is NOT materialized in the rootfs overlay (e.g. into a RO-mounted
-//     prefix) is left untouched -> the documented T9 limitation.
-//   - relative entry -> resolve command-v-style across prefix:imagePATH, then
-//     shadow it with a shim in the first image-PATH dir so crun finds it first.
+//   - absolute entry -> crun execs it directly; wrap in place inside the
+//     writable rootfs. An absolute path NOT present in the rootfs (e.g. into the
+//     RO-mounted /nix/store closure we injected) is left untouched -> the
+//     documented T9 limitation.
+//   - relative entry -> resolve command-v-style across prefix (host-accessible
+//     /nix paths, identity) then the image PATH (inside the rootfs), then shadow
+//     it with a shim in the first image-PATH dir so crun finds it first.
 //
 // Best-effort: any "nothing to wrap" condition returns nil; only a genuine I/O
 // failure mid-wrap returns an error.
-func wrapEntrypoint(spec *oci.Spec, rootfs string) error {
+func wrapEntrypoint(spec *oci.Spec, rootfs string, prefix []string, env map[string]string) error {
 	if spec.Process == nil {
 		return nil
 	}
-	env := spec.Process.Env
-
-	// 1. prefix = DEVSHELL_PREFIX env value; empty -> nothing to do.
-	prefix := envValue(env, "DEVSHELL_PREFIX")
-	if prefix == "" {
+	if len(prefix) == 0 && len(env) == 0 {
 		return nil
 	}
-
-	// 2. entry = args[0]; empty -> nothing to do.
 	if len(spec.Process.Args) == 0 {
 		return nil
 	}
@@ -89,21 +153,21 @@ func wrapEntrypoint(spec *oci.Spec, rootfs string) error {
 	if entry == "" {
 		return nil
 	}
+	imgPath := envValue(spec.Process.Env, "PATH")
 
-	// 3. imgPath = PATH env value (the image's PATH at hook time).
-	imgPath := envValue(env, "PATH")
+	// The export block injected into every shim: additive PATH (prefix entries
+	// are /nix store paths with no shell metacharacters, so the MVP's
+	// double-quoted form is safe) plus each dev-shell var single-quoted (values
+	// may contain spaces, quotes, even newlines).
+	var blk strings.Builder
+	if len(prefix) > 0 {
+		fmt.Fprintf(&blk, "export PATH=\"%s:$PATH\"\n", strings.Join(prefix, ":"))
+	}
+	for _, k := range sortedKeys(env) {
+		fmt.Fprintf(&blk, "export %s=%s\n", k, shellQuote(env[k]))
+	}
+	exports := blk.String()
 
-	// hostOf maps a container path to a host-accessible path. The hook runs in
-	// the host ns where the container's bind-mounts are NOT visible: map a path
-	// under a bind to its mount source (longest matching destination wins), else
-	// fall back to the rootfs overlay (which IS visible in the host ns).
-	hostOf := makeHostOf(spec.Mounts, rootfs)
-
-	// wrapAt writes a PATH-prepending shim at the rootfs-overlay location for the
-	// given container path (the shim always lands in the writable rootfs, never
-	// on a RO mount), exec'ing target (itself a container path resolved inside
-	// the container at runtime). Creates the parent dir, requires it writable,
-	// chmod 0755.
 	wrapAt := func(containerPath, target string) error {
 		shimHost := filepath.Join(rootfs, containerPath)
 		dir := filepath.Dir(shimHost)
@@ -115,10 +179,7 @@ func wrapEntrypoint(spec *oci.Spec, rootfs string) error {
 		if !isWritable(dir) {
 			return fmt.Errorf("wrapAt: %s not writable", dir)
 		}
-		// Exactly the MVP's printf format (lines 43): the prefix and $PATH share
-		// one pair of double quotes, and target is double-quoted. prefix/target
-		// are container paths with no shell metacharacters, matching the MVP.
-		content := fmt.Sprintf("#!/bin/sh\nexport PATH=\"%s:$PATH\"\nexec \"%s\" \"$@\"\n", prefix, target)
+		content := "#!/bin/sh\n" + exports + fmt.Sprintf("exec \"%s\" \"$@\"\n", target)
 		if err := os.WriteFile(shimHost, []byte(content), 0o755); err != nil {
 			return fmt.Errorf("wrapAt: write %s: %w", shimHost, err)
 		}
@@ -130,12 +191,9 @@ func wrapEntrypoint(spec *oci.Spec, rootfs string) error {
 	}
 
 	if strings.HasPrefix(entry, "/") {
-		// Absolute entrypoint: crun execs it directly -> wrap in place.
-		//
-		// Only proceed if the path EXISTS in the rootfs overlay and its parent
-		// is writable. This existence check is exactly the T9 limitation: an
-		// absolute path into a RO-mounted prefix (e.g. /nix/store/.../bin/tool)
-		// is not present in the rootfs overlay -> skip, leave intact, return nil.
+		// Absolute entrypoint: wrap in place only if present in the writable
+		// rootfs. A /nix/store path (our RO injected closure) is not present in
+		// the host-ns view of the rootfs -> skip = the T9 limitation.
 		entryHost := filepath.Join(rootfs, entry)
 		if !exists(entryHost) || !isWritable(filepath.Dir(entryHost)) {
 			return nil
@@ -149,23 +207,30 @@ func wrapEntrypoint(spec *oci.Spec, rootfs string) error {
 		return wrapAt(entry, entry+".real")
 	}
 
-	// Relative entrypoint: resolve command-v-style across prefix dirs THEN
-	// imgPath dirs. For each dir d, the candidate container path is d/entry; if
-	// hostOf(candidate) exists and is executable on the host, that's the real
-	// target (a container path). Take the first match.
+	// Relative entrypoint. Resolve across prefix (host-accessible /nix paths:
+	// the candidate IS its own host path) then the image PATH (inside the
+	// rootfs). real is the resolved CONTAINER path the shim will exec.
 	var real string
-	for _, d := range append(splitPath(prefix), splitPath(imgPath)...) {
-		candidate := d + "/" + entry
-		if isExecutable(hostOf(candidate)) {
-			real = candidate
+	for _, d := range prefix {
+		cand := d + "/" + entry
+		if isExecutable(cand) { // d is a host /nix store path
+			real = cand
 			break
+		}
+	}
+	if real == "" {
+		for _, d := range splitPath(imgPath) {
+			cand := d + "/" + entry
+			if isExecutable(filepath.Join(rootfs, cand)) { // image path inside the rootfs
+				real = cand
+				break
+			}
 		}
 	}
 	if real == "" {
 		return nil
 	}
 
-	// Shadow it with a shim in the FIRST image-PATH dir so crun finds it first.
 	imgDirs := splitPath(imgPath)
 	if len(imgDirs) == 0 {
 		return nil
@@ -187,31 +252,21 @@ func wrapEntrypoint(spec *oci.Spec, rootfs string) error {
 	return wrapAt(shimPath, real)
 }
 
-// makeHostOf builds a container-path -> host-path resolver for the given mounts
-// and rootfs. The hook runs in the host namespace where the container's
-// bind-mounts are NOT visible, so a path under a bind is remapped to its mount
-// source (longest matching destination wins when mounts nest); an unmounted
-// path falls back to the rootfs overlay, which IS visible in the host ns.
-func makeHostOf(mounts []oci.Mount, rootfs string) func(string) string {
-	return func(containerPath string) string {
-		bestDest, bestSrc := "", ""
-		found := false
-		for _, m := range mounts {
-			if m.Destination == "" {
-				continue
-			}
-			if !pathHasPrefix(containerPath, m.Destination) {
-				continue
-			}
-			if !found || len(m.Destination) > len(bestDest) {
-				bestDest, bestSrc, found = m.Destination, m.Source, true
-			}
-		}
-		if found {
-			return bestSrc + strings.TrimPrefix(containerPath, bestDest)
-		}
-		return filepath.Join(rootfs, containerPath)
+// shellQuote single-quotes s for safe inclusion in a /bin/sh script, escaping
+// embedded single quotes. Single-quoted strings preserve every other byte
+// verbatim (including newlines), which dev-shell values can contain.
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
+// sortedKeys returns m's keys sorted, for deterministic shim output.
+func sortedKeys(m map[string]string) []string {
+	ks := make([]string, 0, len(m))
+	for k := range m {
+		ks = append(ks, k)
 	}
+	sort.Strings(ks)
+	return ks
 }
 
 // envValue returns the value of the first "<key>=<value>" entry in env, or "".
@@ -237,18 +292,6 @@ func splitPath(s string) []string {
 		}
 	}
 	return out
-}
-
-// pathHasPrefix reports whether p is equal to prefix or lies beneath it on a
-// path-separator boundary, so "/nix" matches "/nix/store/x" but not "/nixfoo".
-func pathHasPrefix(p, prefix string) bool {
-	if prefix == "/" {
-		return strings.HasPrefix(p, "/")
-	}
-	if p == prefix {
-		return true
-	}
-	return strings.HasPrefix(p, prefix+"/")
 }
 
 // exists reports whether path exists (file, dir, or symlink target).

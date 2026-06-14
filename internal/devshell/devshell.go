@@ -234,6 +234,22 @@ func envFromDiff(next map[string]string) map[string]string {
 	return env
 }
 
+// RuntimeEnv decodes the dev-shell's additive-PATH prefix and exported env vars
+// from the inherited DIRENV_DIFF (the loaded direnv environment the runtime
+// hook runs in). ok is false when DIRENV_DIFF is unset — i.e. not launched from
+// a loaded dev-shell. (PLAN §1 "reading the dev-shell at runtime".)
+func RuntimeEnv(getenv func(string) (string, bool)) (prefix []string, env map[string]string, ok bool, err error) {
+	diff, has := getenv("DIRENV_DIFF")
+	if !has || diff == "" {
+		return nil, nil, false, nil
+	}
+	prev, next, err := decodeDirenvDiff(diff)
+	if err != nil {
+		return nil, nil, true, fmt.Errorf("decode DIRENV_DIFF: %w", err)
+	}
+	return prefixFromDiff(prev["PATH"], next["PATH"]), envFromDiff(next), true, nil
+}
+
 // resolveGCRoot finds the nix-direnv flake-profile gcroot symlink under
 // <root>/.direnv/flake-profile-* and resolves it to its /nix/store target.
 func resolveGCRoot(projectRoot string, _ getenvFunc) (string, error) {

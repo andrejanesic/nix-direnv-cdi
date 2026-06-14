@@ -1,5 +1,9 @@
 package hook
 
+// Tier A unit tests for the hook core: the gate + mount-injection dispatch
+// (run) and the entrypoint wrapper (wrapEntrypoint). No real container; the
+// mount step is injected. The actual ns-entry mount is covered by Tier B/C.
+
 import (
 	"os"
 	"path/filepath"
@@ -7,350 +11,187 @@ import (
 	"testing"
 
 	oci "github.com/opencontainers/runtime-spec/specs-go"
+
+	"github.com/andrejanesic/nix-direnv-cdi/internal/devshell"
 )
 
-// mkExec writes an executable file at path (creating parent dirs), so the host
-// stat/exec checks see a real binary the way the MVP's `[ -x ]` test does.
-func mkExec(t *testing.T, path string) {
+func writeExec(t *testing.T, path string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		t.Fatalf("mkdir %s: %v", filepath.Dir(path), err)
+		t.Fatal(err)
 	}
-	if err := os.WriteFile(path, []byte("#!/bin/sh\necho real\n"), 0o755); err != nil {
-		t.Fatalf("write %s: %v", path, err)
-	}
-	if err := os.Chmod(path, 0o755); err != nil {
-		t.Fatalf("chmod %s: %v", path, err)
+	if err := os.WriteFile(path, []byte("#!/bin/sh\n:\n"), 0o755); err != nil {
+		t.Fatal(err)
 	}
 }
 
-func mustRead(t *testing.T, path string) string {
-	t.Helper()
-	b, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read %s: %v", path, err)
+func TestShellQuote(t *testing.T) {
+	cases := map[string]string{
+		"plain":   "'plain'",
+		"a b":     "'a b'",
+		"a'b":     `'a'\''b'`,
+		"":        "''",
+		"$X`cmd`": "'$X`cmd`'",
 	}
-	return string(b)
+	for in, want := range cases {
+		if got := shellQuote(in); got != want {
+			t.Errorf("shellQuote(%q) = %q, want %q", in, got, want)
+		}
+	}
 }
 
-func specWith(args []string, env []string, mounts []oci.Mount) *oci.Spec {
-	return &oci.Spec{
-		Process: &oci.Process{Args: args, Env: env},
-		Mounts:  mounts,
-	}
-}
-
-// T1/T2/T3/T4 analog: a relative entrypoint resolving to a base-image tool.
-// crun finds the shadow shim first; the shim prepends the prefix and execs the
-// untouched real binary (additive PATH, real binary preserved).
-func TestWrapEntrypoint_RelativeImageTool(t *testing.T) {
+func TestWrap_RelativeEntry_ShimContent(t *testing.T) {
+	prefixDir := filepath.Join(t.TempDir(), "nixbin")
+	writeExec(t, filepath.Join(prefixDir, "tool")) // dev-shell-only tool, host-accessible
 	rootfs := t.TempDir()
-	// Image tool present at rootfs/usr/bin/bash; first PATH dir is /usr/local/sbin.
-	mkExec(t, filepath.Join(rootfs, "usr/bin/bash"))
-
-	spec := specWith(
-		[]string{"bash"},
-		[]string{
-			"DEVSHELL_PREFIX=/devshellprefix",
-			"PATH=/usr/local/sbin:/usr/bin",
-		},
-		nil,
-	)
-
-	if err := wrapEntrypoint(spec, rootfs); err != nil {
-		t.Fatalf("wrapEntrypoint: %v", err)
-	}
-
-	// Shadow shim written into the first PATH dir.
-	shim := filepath.Join(rootfs, "usr/local/sbin/bash")
-	got := mustRead(t, shim)
-	if !strings.Contains(got, `export PATH="/devshellprefix:$PATH"`) {
-		t.Errorf("shim missing additive PATH export:\n%s", got)
-	}
-	if !strings.Contains(got, `exec "/usr/bin/bash" "$@"`) {
-		t.Errorf("shim does not exec the real image tool:\n%s", got)
-	}
-	// Real binary untouched (not moved aside; no .real created).
-	if _, err := os.Stat(filepath.Join(rootfs, "usr/bin/bash")); err != nil {
-		t.Errorf("real bash should be preserved: %v", err)
-	}
-	if exists(filepath.Join(rootfs, "usr/bin/bash.real")) {
-		t.Errorf("real bash should NOT have been moved aside")
-	}
-	// Shim is executable.
-	if fi, err := os.Stat(shim); err != nil || fi.Mode().Perm()&0o111 == 0 {
-		t.Errorf("shim must be executable (mode=%v err=%v)", fi.Mode(), err)
-	}
-}
-
-// T7/T8 analog: a relative entrypoint that only exists in the dev-shell prefix,
-// which is a RO bind mount (Destination /devshellprefix, Source = a host dir).
-// The shim is shadowed into the first image-PATH dir and execs the CONTAINER
-// path of the prefix tool.
-func TestWrapEntrypoint_RelativePrefixOnlyTool(t *testing.T) {
-	rootfs := t.TempDir()
-	prefixSrc := t.TempDir() // host-side source of the /devshellprefix mount
-	mkExec(t, filepath.Join(prefixSrc, "tool"))
-	// First image PATH dir must exist & be writable for the shim.
-	if err := os.MkdirAll(filepath.Join(rootfs, "usr/local/sbin"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(rootfs, "usr/bin"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 
-	spec := specWith(
-		[]string{"tool"},
-		[]string{
-			"DEVSHELL_PREFIX=/devshellprefix",
-			"PATH=/usr/local/sbin:/usr/bin",
-		},
-		[]oci.Mount{{
-			Destination: "/devshellprefix",
-			Source:      prefixSrc,
-			Type:        "bind",
-			Options:     []string{"ro", "bind"},
-		}},
-	)
+	spec := &oci.Spec{Process: &oci.Process{
+		Args: []string{"tool"},
+		Env:  []string{"PATH=/usr/bin"},
+	}}
+	env := map[string]string{"CC": "gcc", "WEIRD": "a b'c"}
 
-	if err := wrapEntrypoint(spec, rootfs); err != nil {
+	if err := wrapEntrypoint(spec, rootfs, []string{prefixDir}, env); err != nil {
 		t.Fatalf("wrapEntrypoint: %v", err)
 	}
 
-	shim := filepath.Join(rootfs, "usr/local/sbin/tool")
-	got := mustRead(t, shim)
-	if !strings.Contains(got, `export PATH="/devshellprefix:$PATH"`) {
-		t.Errorf("shim missing additive PATH export:\n%s", got)
-	}
-	// Execs the CONTAINER path of the prefix tool, not the host source path.
-	if !strings.Contains(got, `exec "/devshellprefix/tool" "$@"`) {
-		t.Errorf("shim should exec the container path of the prefix tool:\n%s", got)
-	}
-	// The RO mount source is untouched; no .real created anywhere.
-	if exists(filepath.Join(prefixSrc, "tool.real")) {
-		t.Errorf("prefix source tool should NOT have been moved aside")
-	}
-}
-
-// T10 analog: an absolute entrypoint inside the writable rootfs is wrapped in
-// place — the real is moved to <entry>.real and a wrapper is written at <entry>.
-func TestWrapEntrypoint_AbsoluteInRootfs(t *testing.T) {
-	rootfs := t.TempDir()
-	mkExec(t, filepath.Join(rootfs, "bin/sh"))
-
-	spec := specWith(
-		[]string{"/bin/sh"},
-		[]string{
-			"DEVSHELL_PREFIX=/devshellprefix",
-			"PATH=/usr/local/sbin:/usr/bin",
-		},
-		nil,
-	)
-
-	if err := wrapEntrypoint(spec, rootfs); err != nil {
-		t.Fatalf("wrapEntrypoint: %v", err)
-	}
-
-	// Real moved aside.
-	if !exists(filepath.Join(rootfs, "bin/sh.real")) {
-		t.Errorf("real /bin/sh should have been moved to /bin/sh.real")
-	}
-	// Wrapper at the original path.
-	got := mustRead(t, filepath.Join(rootfs, "bin/sh"))
-	if !strings.Contains(got, `export PATH="/devshellprefix:$PATH"`) {
-		t.Errorf("wrapper missing additive PATH export:\n%s", got)
-	}
-	if !strings.Contains(got, `exec "/bin/sh.real" "$@"`) {
-		t.Errorf("wrapper should exec the moved-aside real:\n%s", got)
-	}
-}
-
-// T9 limitation: an absolute path into a RO-mounted prefix is NOT materialized
-// in the rootfs overlay, so it is NOT wrapped — the original mount is untouched
-// and no error is returned.
-func TestWrapEntrypoint_AbsoluteIntoROMount_NotWrapped(t *testing.T) {
-	rootfs := t.TempDir()
-	prefixSrc := t.TempDir()
-	mkExec(t, filepath.Join(prefixSrc, "tool"))
-	// Note: deliberately do NOT create rootfs/devshellprefix/tool.
-
-	spec := specWith(
-		[]string{"/devshellprefix/tool"},
-		[]string{
-			"DEVSHELL_PREFIX=/devshellprefix",
-			"PATH=/usr/local/sbin:/usr/bin",
-		},
-		[]oci.Mount{{
-			Destination: "/devshellprefix",
-			Source:      prefixSrc,
-			Type:        "bind",
-			Options:     []string{"ro", "bind"},
-		}},
-	)
-
-	if err := wrapEntrypoint(spec, rootfs); err != nil {
-		t.Fatalf("wrapEntrypoint should be a no-op, got error: %v", err)
-	}
-
-	// Nothing written into the rootfs overlay for the absolute path.
-	if exists(filepath.Join(rootfs, "devshellprefix/tool")) {
-		t.Errorf("a shim should NOT have been written into the rootfs overlay")
-	}
-	// The RO mount source is untouched.
-	if exists(filepath.Join(prefixSrc, "tool.real")) {
-		t.Errorf("RO mount source must be untouched")
-	}
-	if !exists(filepath.Join(prefixSrc, "tool")) {
-		t.Errorf("RO mount source tool must still exist")
-	}
-}
-
-// hostOf mapping: container path under a mount maps to source+suffix; the
-// longest matching destination wins when nested; unmounted paths fall back to
-// rootfs+path. Exercised through wrapEntrypoint via the resolver behaviour.
-func TestHostOf_Mapping(t *testing.T) {
-	rootfs := t.TempDir()
-	outerSrc := t.TempDir()
-	innerSrc := t.TempDir()
-
-	mounts := []oci.Mount{
-		{Destination: "/nix", Source: outerSrc},
-		{Destination: "/nix/store", Source: innerSrc},
-	}
-	hostOf := makeHostOf(mounts, rootfs)
-
-	// Longest destination wins: /nix/store/x -> innerSrc/x (not outerSrc/store/x).
-	if got, want := hostOf("/nix/store/x"), filepath.Join(innerSrc, "x"); got != want {
-		t.Errorf("nested mount: hostOf(/nix/store/x)=%q want %q", got, want)
-	}
-	// /nix/foo -> outerSrc/foo.
-	if got, want := hostOf("/nix/foo"), filepath.Join(outerSrc, "foo"); got != want {
-		t.Errorf("outer mount: hostOf(/nix/foo)=%q want %q", got, want)
-	}
-	// "/nixfoo" must NOT match the "/nix" destination (boundary check).
-	if got, want := hostOf("/nixfoo"), filepath.Join(rootfs, "nixfoo"); got != want {
-		t.Errorf("boundary: hostOf(/nixfoo)=%q want %q", got, want)
-	}
-	// Unmounted path falls back to rootfs+path.
-	if got, want := hostOf("/usr/bin/x"), filepath.Join(rootfs, "usr/bin/x"); got != want {
-		t.Errorf("fallback: hostOf(/usr/bin/x)=%q want %q", got, want)
-	}
-}
-
-// Best-effort: missing DEVSHELL_PREFIX, empty args, an empty entry, and an
-// unresolvable relative entry each return nil with nothing wrapped.
-func TestWrapEntrypoint_BestEffortNoOps(t *testing.T) {
-	t.Run("missing DEVSHELL_PREFIX", func(t *testing.T) {
-		rootfs := t.TempDir()
-		mkExec(t, filepath.Join(rootfs, "usr/bin/bash"))
-		spec := specWith([]string{"bash"}, []string{"PATH=/usr/bin"}, nil)
-		if err := wrapEntrypoint(spec, rootfs); err != nil {
-			t.Fatalf("want nil, got %v", err)
-		}
-		assertNoShims(t, rootfs)
-	})
-
-	t.Run("empty args", func(t *testing.T) {
-		rootfs := t.TempDir()
-		spec := specWith(nil, []string{"DEVSHELL_PREFIX=/p", "PATH=/usr/bin"}, nil)
-		if err := wrapEntrypoint(spec, rootfs); err != nil {
-			t.Fatalf("want nil, got %v", err)
-		}
-	})
-
-	t.Run("empty entry", func(t *testing.T) {
-		rootfs := t.TempDir()
-		spec := specWith([]string{""}, []string{"DEVSHELL_PREFIX=/p", "PATH=/usr/bin"}, nil)
-		if err := wrapEntrypoint(spec, rootfs); err != nil {
-			t.Fatalf("want nil, got %v", err)
-		}
-	})
-
-	t.Run("unresolvable relative entry", func(t *testing.T) {
-		rootfs := t.TempDir()
-		if err := os.MkdirAll(filepath.Join(rootfs, "usr/bin"), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		spec := specWith(
-			[]string{"doesnotexist"},
-			[]string{"DEVSHELL_PREFIX=/devshellprefix", "PATH=/usr/bin"},
-			nil,
-		)
-		if err := wrapEntrypoint(spec, rootfs); err != nil {
-			t.Fatalf("want nil, got %v", err)
-		}
-		assertNoShims(t, rootfs)
-	})
-
-	t.Run("nil Process", func(t *testing.T) {
-		rootfs := t.TempDir()
-		spec := &oci.Spec{}
-		if err := wrapEntrypoint(spec, rootfs); err != nil {
-			t.Fatalf("want nil, got %v", err)
-		}
-	})
-}
-
-// Direct wrapAt content/permission assertion via the relative-tool path: the
-// shim is exactly the documented #!/bin/sh + export PATH + exec, 0755.
-func TestShimContentAndPermissions(t *testing.T) {
-	rootfs := t.TempDir()
-	mkExec(t, filepath.Join(rootfs, "usr/bin/bash"))
-	spec := specWith(
-		[]string{"bash"},
-		[]string{"DEVSHELL_PREFIX=/devshellprefix", "PATH=/usr/local/sbin:/usr/bin"},
-		nil,
-	)
-	if err := wrapEntrypoint(spec, rootfs); err != nil {
-		t.Fatalf("wrapEntrypoint: %v", err)
-	}
-	shim := filepath.Join(rootfs, "usr/local/sbin/bash")
-	want := "#!/bin/sh\nexport PATH=\"/devshellprefix:$PATH\"\nexec \"/usr/bin/bash\" \"$@\"\n"
-	if got := mustRead(t, shim); got != want {
-		t.Errorf("shim content mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
-	}
-	fi, err := os.Stat(shim)
+	// Shim shadows the entry in the first image-PATH dir.
+	shim := filepath.Join(rootfs, "usr/bin/tool")
+	data, err := os.ReadFile(shim)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("shim not written: %v", err)
 	}
-	if fi.Mode().Perm() != 0o755 {
-		t.Errorf("shim perm = %v, want 0755", fi.Mode().Perm())
-	}
-}
-
-// Relative entry whose resolved real binary lives in the FIRST image-PATH dir:
-// the shim would clobber it, so the real is moved aside and the wrapper execs
-// the moved-aside copy.
-func TestWrapEntrypoint_RelativeShimClobbersReal(t *testing.T) {
-	rootfs := t.TempDir()
-	// The tool lives in /usr/local/sbin, which is the first PATH dir.
-	mkExec(t, filepath.Join(rootfs, "usr/local/sbin/tool"))
-	spec := specWith(
-		[]string{"tool"},
-		[]string{"DEVSHELL_PREFIX=/devshellprefix", "PATH=/usr/local/sbin:/usr/bin"},
-		nil,
-	)
-	if err := wrapEntrypoint(spec, rootfs); err != nil {
-		t.Fatalf("wrapEntrypoint: %v", err)
-	}
-	// Real moved aside.
-	if !exists(filepath.Join(rootfs, "usr/local/sbin/tool.real")) {
-		t.Errorf("real tool should have been moved to tool.real")
-	}
-	got := mustRead(t, filepath.Join(rootfs, "usr/local/sbin/tool"))
-	if !strings.Contains(got, `exec "/usr/local/sbin/tool.real" "$@"`) {
-		t.Errorf("wrapper should exec the moved-aside real:\n%s", got)
-	}
-}
-
-// assertNoShims fails if any shim-looking file was written into the rootfs
-// (anything beyond the fixtures the test created). It checks the well-known
-// shadow dir only, which is enough for the no-op cases above.
-func assertNoShims(t *testing.T, rootfs string) {
-	t.Helper()
-	for _, p := range []string{
-		filepath.Join(rootfs, "usr/local/sbin/bash"),
-		filepath.Join(rootfs, "usr/bin/bash.real"),
+	s := string(data)
+	for _, want := range []string{
+		"#!/bin/sh\n",
+		`export PATH="` + prefixDir + `:$PATH"`,
+		"export CC='gcc'",
+		`export WEIRD='a b'\''c'`, // single-quote escaped
+		`exec "` + prefixDir + `/tool" "$@"`,
 	} {
-		if exists(p) {
-			t.Errorf("unexpected file written: %s", p)
+		if !strings.Contains(s, want) {
+			t.Errorf("shim missing %q\n---\n%s", want, s)
 		}
+	}
+	if fi, _ := os.Stat(shim); fi.Mode().Perm()&0o111 == 0 {
+		t.Error("shim must be executable")
+	}
+	// env exports are sorted (CC before WEIRD).
+	if strings.Index(s, "export CC=") > strings.Index(s, "export WEIRD=") {
+		t.Error("env exports should be sorted")
+	}
+}
+
+func TestWrap_AbsoluteInRootfs_T10(t *testing.T) {
+	rootfs := t.TempDir()
+	app := filepath.Join(rootfs, "usr/local/bin/app")
+	writeExec(t, app)
+
+	spec := &oci.Spec{Process: &oci.Process{
+		Args: []string{"/usr/local/bin/app"},
+		Env:  []string{"PATH=/usr/local/bin"},
+	}}
+	if err := wrapEntrypoint(spec, rootfs, []string{"/nix/store/p/bin"}, nil); err != nil {
+		t.Fatalf("wrapEntrypoint: %v", err)
+	}
+
+	// Real moved aside; in-place path is now a PATH-prepending shim.
+	if _, err := os.Stat(app + ".real"); err != nil {
+		t.Errorf("real binary not moved aside: %v", err)
+	}
+	data, _ := os.ReadFile(app)
+	if !strings.Contains(string(data), `exec "/usr/local/bin/app.real" "$@"`) {
+		t.Errorf("in-place shim wrong:\n%s", data)
+	}
+}
+
+func TestWrap_AbsoluteIntoROStore_T9_NoOp(t *testing.T) {
+	rootfs := t.TempDir() // empty: the /nix/store path is NOT present here
+	spec := &oci.Spec{Process: &oci.Process{
+		Args: []string{"/nix/store/abc/bin/tool"},
+		Env:  []string{"PATH=/usr/bin"},
+	}}
+	if err := wrapEntrypoint(spec, rootfs, []string{"/nix/store/abc/bin"}, nil); err != nil {
+		t.Fatalf("wrapEntrypoint: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(rootfs, "nix/store/abc/bin/tool")); err == nil {
+		t.Error("T9: must not create/wrap an absolute RO-store entrypoint")
+	}
+}
+
+func TestWrap_NothingToDo(t *testing.T) {
+	rootfs := t.TempDir()
+	// No prefix and no env -> no-op.
+	spec := &oci.Spec{Process: &oci.Process{Args: []string{"sh"}, Env: []string{"PATH=/bin"}}}
+	if err := wrapEntrypoint(spec, rootfs, nil, nil); err != nil {
+		t.Fatalf("wrapEntrypoint: %v", err)
+	}
+	if entries, _ := os.ReadDir(rootfs); len(entries) != 0 {
+		t.Errorf("expected no writes, got %v", entries)
+	}
+}
+
+// TestRun_GateClosed: with no DIRENV_DIR the device is inert — no mount, no wrap.
+func TestRun_GateClosed(t *testing.T) {
+	called := false
+	mount := func(pid int, rootfs string, closure []string) error { called = true; return nil }
+	getenv := func(k string) (string, bool) { return "", false } // nothing set
+
+	rootfs := t.TempDir()
+	spec := &oci.Spec{Process: &oci.Process{Args: []string{"sh"}, Env: []string{"PATH=/bin"}}}
+	state := &oci.State{Pid: 123, Bundle: t.TempDir()}
+
+	if err := run(state, spec, rootfs, getenv, mount); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if called {
+		t.Error("gate closed: mount must NOT be called without DIRENV_DIR")
+	}
+	if entries, _ := os.ReadDir(rootfs); len(entries) != 0 {
+		t.Error("gate closed: nothing should be written")
+	}
+}
+
+// TestRun_GateOpen_MountsClosure: with DIRENV_DIR + a mounts.json, run injects
+// the closure (mount called with the right pid/rootfs/closure).
+func TestRun_GateOpen_MountsClosure(t *testing.T) {
+	project := t.TempDir()
+	closure := []string{"/nix/store/aaa", "/nix/store/bbb"}
+	if err := devshell.WriteMounts(filepath.Join(project, ".direnv", "cdi", "mounts.json"), closure); err != nil {
+		t.Fatal(err)
+	}
+
+	var gotPid int
+	var gotRootfs string
+	var gotClosure []string
+	mount := func(pid int, rootfs string, c []string) error {
+		gotPid, gotRootfs, gotClosure = pid, rootfs, c
+		return nil
+	}
+	getenv := func(k string) (string, bool) {
+		if k == "DIRENV_DIR" {
+			return "-" + project, true // direnv's leading '-' marker
+		}
+		return "", false // no DIRENV_DIFF -> wrap is skipped, mount still runs
+	}
+
+	rootfs := t.TempDir()
+	spec := &oci.Spec{Process: &oci.Process{Args: []string{"sh"}, Env: []string{"PATH=/bin"}}}
+	state := &oci.State{Pid: 4242, Bundle: t.TempDir()}
+
+	if err := run(state, spec, rootfs, getenv, mount); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if gotPid != 4242 {
+		t.Errorf("mount pid = %d, want 4242", gotPid)
+	}
+	if gotRootfs != rootfs {
+		t.Errorf("mount rootfs = %q, want %q", gotRootfs, rootfs)
+	}
+	if strings.Join(gotClosure, ",") != strings.Join(closure, ",") {
+		t.Errorf("mount closure = %v, want %v", gotClosure, closure)
 	}
 }
