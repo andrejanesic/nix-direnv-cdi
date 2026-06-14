@@ -1,6 +1,6 @@
-// Package install registers the shared CDI spec directory with podman and
-// docker so the device reference (`--device nix-direnv-cdi.org/env=current`)
-// resolves without a per-run `--cdi-spec-dir` flag.
+// Package install registers the generic CDI spec with podman and docker so the
+// device reference (`--device nix-direnv-cdi.org/env=current`) resolves without
+// a per-run `--cdi-spec-dir` flag.
 //
 // Strategy per runtime:
 //   - podman: write a dedicated drop-in
@@ -9,9 +9,9 @@
 //     whole file (no need to parse the user's hand-maintained containers.conf,
 //     hence no TOML dependency), and the array carries the defaults so it is
 //     correct whether podman replaces or appends on merge.
-//   - docker: merge "cdi-spec-dirs" into /etc/docker/daemon.json (strict JSON,
-//     stdlib only). Requires root and a daemon restart to take effect, so it is
-//     attempted only when docker is detected.
+//   - docker: write the same generic spec to Docker's daemon-scanned system CDI
+//     directory, /etc/cdi/nix-direnv.json. Docker is system-wide, so normal
+//     install does not add a per-user CDI dir to /etc/docker/daemon.json.
 //
 // Both paths are backup-then-auto with a manual fallback: a pre-existing target
 // is copied to "<path>.bak" before being rewritten, and if backup or write
@@ -21,7 +21,6 @@ package install
 
 import (
 	"bytes"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -41,14 +40,14 @@ var defaultSpecDirs = []string{"/etc/cdi", "/var/run/cdi"}
 // Paths are the filesystem targets install writes to. Factored out so tests can
 // redirect them into a temp dir; DefaultPaths resolves the real locations.
 type Paths struct {
-	SharedDir        string // the shared CDI spec dir to register (created 0755)
-	PodmanDropin     string // containers.conf.d/nix-direnv-cdi.conf
-	DockerDaemonJSON string // /etc/docker/daemon.json
+	SharedDir      string // the user shared CDI spec dir for podman (created 0755)
+	PodmanDropin   string // containers.conf.d/nix-direnv-cdi.conf
+	DockerSpecPath string // /etc/cdi/nix-direnv.json
 }
 
 // DefaultPaths resolves the real install targets for sharedDir. The podman
 // drop-in lives under $XDG_CONFIG_HOME/containers (or ~/.config/containers);
-// docker's daemon config is the conventional /etc/docker/daemon.json.
+// docker uses the system CDI spec path scanned by the daemon.
 func DefaultPaths(sharedDir string) (Paths, error) {
 	base := os.Getenv("XDG_CONFIG_HOME")
 	if base == "" {
@@ -59,18 +58,18 @@ func DefaultPaths(sharedDir string) (Paths, error) {
 		base = filepath.Join(home, ".config")
 	}
 	return Paths{
-		SharedDir:        sharedDir,
-		PodmanDropin:     filepath.Join(base, "containers", "containers.conf.d", "nix-direnv-cdi.conf"),
-		DockerDaemonJSON: "/etc/docker/daemon.json",
+		SharedDir:      sharedDir,
+		PodmanDropin:   filepath.Join(base, "containers", "containers.conf.d", "nix-direnv-cdi.conf"),
+		DockerSpecPath: filepath.Join("/etc/cdi", cdispec.FileName),
 	}, nil
 }
 
-// Run registers p.SharedDir with podman (always) and docker (if detected),
-// writing a human-readable transcript to w. It returns an error only for
-// catastrophic failures (e.g. the shared dir can't be created); a runtime that
-// can't be auto-registered falls back to printed instructions, which is a
-// successful outcome, not an error.
-func Run(p Paths, w io.Writer) error {
+// Run registers p.SharedDir with podman (always) and installs specData for
+// docker (if detected), writing a human-readable transcript to w. It returns an
+// error only for catastrophic failures (e.g. the shared dir can't be created);
+// a runtime that can't be auto-registered falls back to printed instructions,
+// which is a successful outcome, not an error.
+func Run(p Paths, specData []byte, w io.Writer) error {
 	if err := os.MkdirAll(p.SharedDir, 0o755); err != nil {
 		return fmt.Errorf("create shared CDI dir %s: %w", p.SharedDir, err)
 	}
@@ -82,22 +81,22 @@ func Run(p Paths, w io.Writer) error {
 		printPodmanManual(w, p.SharedDir, p.PodmanDropin)
 	}
 
-	// docker: root-level; only meaningful if docker is present.
+	// docker: system-daemon path; only meaningful if docker is present.
 	if dockerPresent() {
-		if err := installDocker(p.DockerDaemonJSON, p.SharedDir, w); err != nil {
-			fmt.Fprintf(w, "docker: could not auto-register (%v); apply manually:\n", err)
-			printDockerManual(w, p.SharedDir, p.DockerDaemonJSON)
+		if err := installDockerSpec(p.DockerSpecPath, specData, w); err != nil {
+			fmt.Fprintf(w, "docker: could not install system CDI spec (%v); apply manually:\n", err)
+			printDockerManual(w, filepath.Join(p.SharedDir, cdispec.FileName), p.DockerSpecPath)
 		}
 	} else {
 		fmt.Fprintln(w, "docker: not detected; if you use docker, apply manually:")
-		printDockerManual(w, p.SharedDir, p.DockerDaemonJSON)
+		printDockerManual(w, filepath.Join(p.SharedDir, cdispec.FileName), p.DockerSpecPath)
 	}
 	return nil
 }
 
 // Uninstall removes this tool's owned CDI registration artifacts. It is
-// idempotent: missing files/settings are reported as already absent. Docker is
-// edited only when it is detected or daemon.json already exists.
+// idempotent: missing files are reported as already absent. Docker's system spec
+// is removed only when docker is detected or the spec file already exists.
 func Uninstall(p Paths, w io.Writer) error {
 	fmt.Fprintf(w, "shared CDI spec dir: %s\n", p.SharedDir)
 
@@ -111,13 +110,13 @@ func Uninstall(p Paths, w io.Writer) error {
 		printPodmanUninstallManual(w, p.PodmanDropin)
 	}
 
-	if dockerPresent() || fileExists(p.DockerDaemonJSON) {
-		if err := uninstallDocker(p.DockerDaemonJSON, p.SharedDir, w); err != nil {
-			fmt.Fprintf(w, "docker: could not auto-unregister (%v); apply manually:\n", err)
-			printDockerUninstallManual(w, p.SharedDir, p.DockerDaemonJSON)
+	if dockerPresent() || fileExists(p.DockerSpecPath) {
+		if err := uninstallDockerSpec(p.DockerSpecPath, w); err != nil {
+			fmt.Fprintf(w, "docker: could not remove system CDI spec (%v); remove manually:\n", err)
+			printDockerUninstallManual(w, p.DockerSpecPath)
 		}
 	} else {
-		fmt.Fprintln(w, "docker: not detected and daemon.json absent; no-op")
+		fmt.Fprintln(w, "docker: not detected and system CDI spec absent; no-op")
 	}
 	return nil
 }
@@ -144,37 +143,6 @@ func uninstallPodman(dropinPath string, w io.Writer) error {
 	} else {
 		return err
 	}
-}
-
-func uninstallDocker(daemonPath, sharedDir string, w io.Writer) error {
-	existing, err := os.ReadFile(daemonPath)
-	if errors.Is(err, fs.ErrNotExist) {
-		fmt.Fprintf(w, "docker: daemon.json absent; no-op (%s)\n", daemonPath)
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-
-	merged, changed, err := removeDockerSpecDir(existing, sharedDir)
-	if err != nil {
-		return err
-	}
-	if !changed {
-		fmt.Fprintf(w, "docker: already unregistered (%s)\n", daemonPath)
-		return nil
-	}
-
-	bak, berr := backupFile(daemonPath)
-	if berr != nil {
-		return fmt.Errorf("backup %s: %w", daemonPath, berr)
-	}
-	fmt.Fprintf(w, "docker: backed up %s -> %s\n", daemonPath, bak)
-	if err := os.WriteFile(daemonPath, merged, 0o644); err != nil {
-		return err
-	}
-	fmt.Fprintf(w, "docker: unregistered %s\n  (wrote %s; restart to apply: sudo systemctl restart docker)\n", sharedDir, daemonPath)
-	return nil
 }
 
 // installPodman writes the drop-in, backing up any pre-existing one first. It is
@@ -204,129 +172,43 @@ func installPodman(dropinPath, sharedDir string, w io.Writer) error {
 	return nil
 }
 
-// installDocker merges the shared dir into daemon.json, backing up the original
-// first. Idempotent if the dir is already listed.
-func installDocker(daemonPath, sharedDir string, w io.Writer) error {
-	var existing []byte
-	if data, err := os.ReadFile(daemonPath); err == nil {
-		existing = data
+// installDockerSpec writes the generic spec to Docker's system CDI path,
+// backing up any divergent pre-existing file first. It is idempotent when the
+// file already holds exactly specData.
+func installDockerSpec(specPath string, specData []byte, w io.Writer) error {
+	if existing, err := os.ReadFile(specPath); err == nil {
+		if bytes.Equal(existing, specData) {
+			fmt.Fprintf(w, "docker: already installed (%s)\n", specPath)
+			return nil
+		}
+		bak, berr := backupFile(specPath)
+		if berr != nil {
+			return fmt.Errorf("backup %s: %w", specPath, berr)
+		}
+		fmt.Fprintf(w, "docker: backed up existing system CDI spec -> %s\n", bak)
 	} else if !errors.Is(err, fs.ErrNotExist) {
 		return err
 	}
-	merged, changed, err := mergeDockerSpecDirs(existing, sharedDir)
-	if err != nil {
+	if err := os.MkdirAll(filepath.Dir(specPath), 0o755); err != nil {
 		return err
 	}
-	if !changed {
-		fmt.Fprintf(w, "docker: already registered (%s)\n", daemonPath)
-		return nil
-	}
-	if len(existing) > 0 {
-		bak, berr := backupFile(daemonPath)
-		if berr != nil {
-			return fmt.Errorf("backup %s: %w", daemonPath, berr)
-		}
-		fmt.Fprintf(w, "docker: backed up %s -> %s\n", daemonPath, bak)
-	}
-	if err := os.MkdirAll(filepath.Dir(daemonPath), 0o755); err != nil {
+	if err := os.WriteFile(specPath, specData, 0o644); err != nil {
 		return err
 	}
-	if err := os.WriteFile(daemonPath, merged, 0o644); err != nil {
-		return err
-	}
-	fmt.Fprintf(w, "docker: registered %s\n  (wrote %s; restart to apply: sudo systemctl restart docker)\n", sharedDir, daemonPath)
+	fmt.Fprintf(w, "docker: installed system CDI spec\n  (wrote %s)\n", specPath)
 	return nil
 }
 
-// mergeDockerSpecDirs returns daemon.json content with sharedDir present in
-// "cdi-spec-dirs", preserving all other keys. changed is false when sharedDir
-// is already listed (so no backup/write is needed). It is the pure core of the
-// docker path and is unit-tested directly. Absent input seeds the default dirs.
-func mergeDockerSpecDirs(existing []byte, sharedDir string) (out []byte, changed bool, err error) {
-	cfg := map[string]any{}
-	if len(bytes.TrimSpace(existing)) > 0 {
-		if err := json.Unmarshal(existing, &cfg); err != nil {
-			return nil, false, fmt.Errorf("parse daemon.json: %w", err)
-		}
-	}
-
-	var dirs []string
-	switch v := cfg["cdi-spec-dirs"].(type) {
-	case nil:
-		dirs = append(dirs, defaultSpecDirs...)
-	case []any:
-		for _, e := range v {
-			s, ok := e.(string)
-			if !ok {
-				return nil, false, fmt.Errorf("daemon.json: cdi-spec-dirs has a non-string entry %v", e)
-			}
-			dirs = append(dirs, s)
-		}
-	default:
-		return nil, false, fmt.Errorf("daemon.json: cdi-spec-dirs is not an array")
-	}
-
-	for _, d := range dirs {
-		if d == sharedDir {
-			return nil, false, nil // already present
-		}
-	}
-	dirs = append(dirs, sharedDir)
-	cfg["cdi-spec-dirs"] = dirs
-
-	b, err := json.MarshalIndent(cfg, "", "  ")
-	if err != nil {
-		return nil, false, err
-	}
-	return append(b, '\n'), true, nil
-}
-
-// removeDockerSpecDir returns daemon.json content with sharedDir removed from
-// "cdi-spec-dirs", preserving every other key and every other dir in its
-// original order. changed is false when the file is already unregistered.
-func removeDockerSpecDir(existing []byte, sharedDir string) (out []byte, changed bool, err error) {
-	cfg := map[string]any{}
-	if len(bytes.TrimSpace(existing)) > 0 {
-		if err := json.Unmarshal(existing, &cfg); err != nil {
-			return nil, false, fmt.Errorf("parse daemon.json: %w", err)
-		}
-	}
-
-	v, ok := cfg["cdi-spec-dirs"]
-	if !ok || v == nil {
-		return nil, false, nil
-	}
-	rawDirs, ok := v.([]any)
-	if !ok {
-		return nil, false, fmt.Errorf("daemon.json: cdi-spec-dirs is not an array")
-	}
-
-	dirs := make([]string, 0, len(rawDirs))
-	for _, e := range rawDirs {
-		s, ok := e.(string)
-		if !ok {
-			return nil, false, fmt.Errorf("daemon.json: cdi-spec-dirs has a non-string entry %v", e)
-		}
-		if s == sharedDir {
-			changed = true
-			continue
-		}
-		dirs = append(dirs, s)
-	}
-	if !changed {
-		return nil, false, nil
-	}
-	if len(dirs) == 0 {
-		delete(cfg, "cdi-spec-dirs")
+func uninstallDockerSpec(specPath string, w io.Writer) error {
+	if err := os.Remove(specPath); err == nil {
+		fmt.Fprintf(w, "docker: removed system CDI spec %s\n", specPath)
+		return nil
+	} else if errors.Is(err, fs.ErrNotExist) {
+		fmt.Fprintf(w, "docker: system CDI spec already absent (%s)\n", specPath)
+		return nil
 	} else {
-		cfg["cdi-spec-dirs"] = dirs
+		return err
 	}
-
-	b, err := json.MarshalIndent(cfg, "", "  ")
-	if err != nil {
-		return nil, false, err
-	}
-	return append(b, '\n'), true, nil
 }
 
 // podmanDropinContent is the full, canonical text of our containers.conf.d
@@ -385,21 +267,20 @@ func printPodmanManual(w io.Writer, sharedDir, dropin string) {
 	fmt.Fprintf(w, "  create %s with:\n\n%s\n", dropin, indent(podmanDropinContent(sharedDir)))
 }
 
-func printDockerManual(w io.Writer, sharedDir, daemonPath string) {
-	snippet, _, _ := mergeDockerSpecDirs(nil, sharedDir)
-	fmt.Fprintf(w, "  add %q to \"cdi-spec-dirs\" in %s (create it if absent), e.g.:\n\n%s\n", sharedDir, daemonPath, indent(string(snippet)))
-	fmt.Fprintln(w, "  then: sudo systemctl restart docker")
-	fmt.Fprintln(w, "  (docker <28.3 also needs \"features\": { \"cdi\": true } in the same file.)")
+func printDockerManual(w io.Writer, userSpecPath, dockerSpecPath string) {
+	fmt.Fprintf(w, "  install the generated generic CDI spec from:\n    %s\n  to Docker's system CDI path:\n    %s\n", userSpecPath, dockerSpecPath)
+	fmt.Fprintln(w, "  for example:")
+	fmt.Fprintf(w, "    sudo install -D -m 0644 %s %s\n", userSpecPath, dockerSpecPath)
+	fmt.Fprintln(w, "  Docker scans this system CDI directory; do not add a per-user CDI dir to /etc/docker/daemon.json on multi-user hosts.")
+	fmt.Fprintln(w, "  (docker <28.3 may also need the CDI feature enabled in daemon.json.)")
 }
 
 func printPodmanUninstallManual(w io.Writer, dropin string) {
 	fmt.Fprintf(w, "  remove %s\n", dropin)
 }
 
-func printDockerUninstallManual(w io.Writer, sharedDir, daemonPath string) {
-	fmt.Fprintf(w, "  remove only %q from \"cdi-spec-dirs\" in %s.\n", sharedDir, daemonPath)
-	fmt.Fprintln(w, "  preserve all other keys and CDI directories, then restart docker:")
-	fmt.Fprintln(w, "  sudo systemctl restart docker")
+func printDockerUninstallManual(w io.Writer, dockerSpecPath string) {
+	fmt.Fprintf(w, "  remove %s\n", dockerSpecPath)
 }
 
 // indent prefixes every non-empty line with four spaces for readable snippets.

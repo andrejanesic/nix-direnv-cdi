@@ -31,8 +31,9 @@ dev-shell isn't there):
 - **Using `sudo`?** Add `-E` (`sudo` strips `DIRENV_DIR`/`DIRENV_DIFF`).
 - **Did `gen` run?** `.direnv/cdi/mounts.json` must exist and be current — re-run
   `nix-direnv-cdi gen`, or reload direnv.
-- **Is the device found?** Run `nix-direnv-cdi install` once, or pass
-  `--cdi-spec-dir ~/.config/cdi` explicitly.
+- **Is the device found?** Run `nix-direnv-cdi install` once. Podman reads the
+  user shared CDI dir registered by the drop-in; Docker reads
+  `/etc/cdi/nix-direnv.json`.
 - **Still stuck?** Set `NDC_HOOK_LOG=/tmp/ndc-hook.log` in the launching
   environment and read the hook's trace (gate decision, mounts, `DIRENV_DIFF`).
 

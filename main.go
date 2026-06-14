@@ -153,6 +153,10 @@ func cmdInstall(args []string) error {
 	if err != nil {
 		return err
 	}
+	specData, err := cdispec.Marshal(spec)
+	if err != nil {
+		return err
+	}
 	sharedDir, err := sharedSpecDir()
 	if err != nil {
 		return err
@@ -168,13 +172,13 @@ func cmdInstall(args []string) error {
 	if err != nil {
 		return err
 	}
-	return install.Run(paths, os.Stdout)
+	return install.Run(paths, specData, os.Stdout)
 }
 
 // cmdUninstall removes the single generic CDI device and unregisters the shared
 // CDI dir from podman/docker. It only removes files/settings owned by this tool:
-// the nix-direnv.json spec, the podman drop-in, and this shared dir entry in
-// docker's cdi-spec-dirs.
+// the user nix-direnv.json spec, the podman drop-in, and Docker's system
+// /etc/cdi/nix-direnv.json spec.
 func cmdUninstall(args []string) error {
 	fs := flag.NewFlagSet("uninstall", flag.ContinueOnError)
 	if err := fs.Parse(args); err != nil {

@@ -65,12 +65,13 @@ nix run github:andrejanesic/nix-direnv-cdi -- install
 # or: nix profile install github:andrejanesic/nix-direnv-cdi && nix-direnv-cdi install
 ```
 
-If Docker is configured, restart it after `install` so any
-`/etc/docker/daemon.json` change is loaded:
-
-```sh
-sudo systemctl restart docker
-```
+For Docker, `install` uses the daemon-scanned system CDI spec path
+`/etc/cdi/nix-direnv.json`. Docker is system-wide, so the installer does not add
+your per-user `~/.config/cdi` directory to `/etc/docker/daemon.json`.
+If that write needs privileges, the command prints the exact manual fallback:
+install the generated spec from `~/.config/cdi/nix-direnv.json` (or the matching
+`$XDG_CONFIG_HOME/cdi` path) to `/etc/cdi/nix-direnv.json`, for example with
+`sudo install -D -m 0644`.
 
 Minimal smoke test:
 
@@ -140,21 +141,14 @@ device:
 - the podman drop-in:
   `$XDG_CONFIG_HOME/containers/containers.conf.d/nix-direnv-cdi.conf`, or
   `~/.config/containers/containers.conf.d/nix-direnv-cdi.conf`
-- this tool's shared CDI dir entry in Docker's `/etc/docker/daemon.json`
-  `cdi-spec-dirs`
+- the Docker system CDI spec: `/etc/cdi/nix-direnv.json`
 
 Run this to remove those owned entries. It removes the spec file, podman
-drop-in, and Docker registration entry; it leaves the shared directory itself in
+drop-in, and Docker system CDI spec; it leaves the shared directory itself in
 place.
 
 ```sh
 nix-direnv-cdi uninstall
-```
-
-If Docker's `daemon.json` changed, restart Docker after uninstall:
-
-```sh
-sudo systemctl restart docker
 ```
 
 Manual rollback is the same set of conservative edits:
@@ -166,19 +160,25 @@ Manual rollback is the same set of conservative edits:
    `~/.config/containers/containers.conf.d/nix-direnv-cdi.conf` (or the matching
    `$XDG_CONFIG_HOME/containers/...` path). Leave other podman config and other
    drop-ins in place.
-3. For Docker, edit `/etc/docker/daemon.json` and remove only this tool's shared
-   CDI dir from `cdi-spec-dirs`. Preserve unrelated Docker settings and other
-   CDI directories. If that entry was the only CDI dir, remove the
-   `cdi-spec-dirs` key instead of leaving an empty array. Restart Docker after
-   saving the file.
+3. For Docker, remove only this tool-owned system CDI spec:
+   `sudo rm /etc/cdi/nix-direnv.json`. Do not remove other CDI specs in
+   `/etc/cdi`.
 
-Before rewriting existing config, the installer writes a same-directory backup
-named `<path>.bak` when it can, for example `/etc/docker/daemon.json.bak` or
-`~/.config/containers/containers.conf.d/nix-direnv-cdi.conf.bak`. Uninstall also
-backs up Docker's `daemon.json` before rewriting it; the owned podman drop-in is
-removed directly. To recover, compare the backup with the current file, then
-restore the needed file contents and restart Docker if `/etc/docker/daemon.json`
-was restored.
+Backup behavior is limited and predictable:
+
+- `install` creates a same-directory `<path>.bak` only before rewriting an
+  existing file with different content, for example
+  `/etc/cdi/nix-direnv.json.bak` or
+  `~/.config/containers/containers.conf.d/nix-direnv-cdi.conf.bak`.
+- If the existing file already matches what `install` would write, it is a
+  no-op and no backup is created or overwritten.
+- If a `.bak` already exists and a real rewrite is needed, the backup path is
+  overwritten with the pre-rewrite content.
+- `uninstall` does not create backups. It removes only the owned files listed
+  above and reports no-op when they are already absent.
+
+Docker `daemon.json` is only relevant for an advanced manual custom CDI
+directory setup; changing that file may require a Docker restart.
 
 ## Documentation
 

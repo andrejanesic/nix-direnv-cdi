@@ -105,11 +105,25 @@ func Validate(spec *specs.Spec) error {
 	return nil
 }
 
+// Marshal validates the spec, then serialises it as canonical indented JSON.
+// The JSON comes from the specs-go struct tags.
+func Marshal(spec *specs.Spec) ([]byte, error) {
+	if err := Validate(spec); err != nil {
+		return nil, err
+	}
+	data, err := json.MarshalIndent(spec, "", "  ")
+	if err != nil {
+		return nil, fmt.Errorf("marshal spec: %w", err)
+	}
+	return append(data, '\n'), nil
+}
+
 // Write validates the spec, then serialises it to dir/FileName (0644). It
 // ensures dir is traversable (>=0755) so rootless podman can resolve it
-// (see docs/internals.md). The JSON comes from the specs-go struct tags.
+// (see docs/internals.md).
 func Write(spec *specs.Spec, dir string) error {
-	if err := Validate(spec); err != nil {
+	data, err := Marshal(spec)
+	if err != nil {
 		return err
 	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -120,11 +134,6 @@ func Write(spec *specs.Spec, dir string) error {
 	}
 
 	path := filepath.Join(dir, FileName)
-	data, err := json.MarshalIndent(spec, "", "  ")
-	if err != nil {
-		return fmt.Errorf("marshal spec: %w", err)
-	}
-	data = append(data, '\n')
 	if err := os.WriteFile(path, data, 0o644); err != nil {
 		return fmt.Errorf("write spec %s: %w", path, err)
 	}

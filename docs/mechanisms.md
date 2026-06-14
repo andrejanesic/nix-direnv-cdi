@@ -118,19 +118,21 @@ Three moments matter, and keeping them separate is the key to the whole design:
 ```
 nix-direnv-cdi install
   └─ writes ~/.config/cdi/nix-direnv.json   (the one generic device; hook path = installed binary)
-  └─ registers that dir with podman (containers.conf.d drop-in) and docker (daemon.json)
+  └─ registers that dir with podman (containers.conf.d drop-in)
+  └─ writes /etc/cdi/nix-direnv.json for Docker's system daemon
 ```
 
 `nix-direnv-cdi uninstall` removes the same owned setup artifacts in reverse:
-the generic CDI spec, the owned podman drop-in, and this tool's shared CDI dir
-from Docker's `cdi-spec-dirs`. Manual rollback should make the same conservative
-edits: delete only `nix-direnv-cdi.conf` from podman's `containers.conf.d`, keep
-other podman config, remove only this tool's CDI dir from Docker, preserve
-unrelated Docker settings and other CDI dirs, and remove the `cdi-spec-dirs` key
-instead of leaving an empty array if it would otherwise be empty. Restart Docker
-after any `/etc/docker/daemon.json` change. See
-[README.md](../README.md#uninstall-and-manual-rollback) for full rollback and
-backup recovery steps.
+the user generic CDI spec, the owned podman drop-in, and the Docker system CDI
+spec at `/etc/cdi/nix-direnv.json`. Docker uses a system daemon, so normal
+install does not add a per-user CDI dir to `/etc/docker/daemon.json` on
+multi-user hosts. Manual rollback should delete only
+`nix-direnv-cdi.conf` from podman's `containers.conf.d`, keep other podman
+config, and remove only `/etc/cdi/nix-direnv.json` for Docker. See
+[README.md](../README.md#uninstall-and-manual-rollback) for full rollback.
+Install backs up divergent existing registration files to `<path>.bak` before
+rewriting them; uninstall removes owned files directly and does not create
+backups.
 
 ### Generate — per project, in `.envrc`
 
