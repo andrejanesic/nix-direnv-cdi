@@ -2,7 +2,7 @@
 // reading the OCI container State (delivered to a hook on stdin) and the
 // bundle's config.json. Field names follow the OCI spec: mounts use
 // .destination/.source, the command is .process.args, env is .process.env, and
-// the rootfs is .root.path (PLAN §1 "config.json field names").
+// the rootfs is .root.path.
 package ociconfig
 
 import (

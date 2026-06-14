@@ -1,8 +1,7 @@
 # nix-direnv-cdi — documentation
 
 Reference docs for nix-direnv-cdi. For a quick start and usage examples, see the
-top-level [README](../README.md); for the full design history and milestones,
-see [PLAN.md](../PLAN.md).
+top-level [README](../README.md).
 
 ## Contents
 

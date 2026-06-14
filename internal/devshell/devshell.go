@@ -42,7 +42,6 @@ type listClosureFunc func(gcroot string) ([]string, error)
 // direnv environment), resolves the gcroot from .direnv/flake-profile-*, and
 // walks the closure via `nix-store -qR`. It delegates to the testable
 // discover() so the unit tests can drive it with fakes (no nix, no direnv).
-// (PLAN §3, milestone 2.)
 func Discover() (*DevShell, error) {
 	return discover(os.LookupEnv, os.Getwd, resolveGCRoot, listClosureNixStore)
 }
@@ -98,8 +97,8 @@ func ProjectRoot() (string, error) {
 
 // Closure returns the dev-shell's runtime closure: every store path from
 // `nix-store -qR` over the gcroot resolved under <projectRoot>/.direnv. It does
-// NOT require DIRENV_DIFF, so it is safe to call during `.envrc` evaluation
-// (PLAN §1, §3 "gen"). This is the list the runtime hook bind-mounts.
+// NOT require DIRENV_DIFF, so it is safe to call during `.envrc` evaluation.
+// This is the list the runtime hook bind-mounts.
 func Closure(projectRoot string) ([]string, error) {
 	gcroot, err := resolveGCRoot(projectRoot, os.LookupEnv)
 	if err != nil {
@@ -109,7 +108,7 @@ func Closure(projectRoot string) ([]string, error) {
 }
 
 // MountsFile is the per-project data `gen` writes and the hook reads: the
-// closure path list to bind-mount. (PLAN §2, §3.)
+// closure path list to bind-mount.
 type MountsFile struct {
 	Closure []string `json:"closure"`
 }
@@ -237,7 +236,7 @@ func envFromDiff(next map[string]string) map[string]string {
 // RuntimeEnv decodes the dev-shell's additive-PATH prefix and exported env vars
 // from the inherited DIRENV_DIFF (the loaded direnv environment the runtime
 // hook runs in). ok is false when DIRENV_DIFF is unset — i.e. not launched from
-// a loaded dev-shell. (PLAN §1 "reading the dev-shell at runtime".)
+// a loaded dev-shell.
 func RuntimeEnv(getenv func(string) (string, bool)) (prefix []string, env map[string]string, ok bool, err error) {
 	diff, has := getenv("DIRENV_DIFF")
 	if !has || diff == "" {

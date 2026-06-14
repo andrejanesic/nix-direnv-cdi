@@ -5,11 +5,11 @@
 // dev-shell prefix is prepended to PATH additively and the dev-shell env vars
 // are exported. Everything it needs is read at run time from the inherited
 // loaded-direnv environment (DIRENV_DIR, DIRENV_DIFF) plus the project's
-// .direnv/cdi/mounts.json. See PLAN.md §1/§3.
+// .direnv/cdi/mounts.json. See docs/mechanisms.md.
 //
-// The entrypoint-wrap algorithm and its T9 limitation are the proven port of
-// the bash MVP (../cdi-additive-test.sh); the dynamic mount injection is the
-// dynamic-design addition.
+// The entrypoint-wrap algorithm and its T1-T10 behaviour matrix (incl. the T9
+// limitation) are documented in docs/mechanisms.md; the dynamic mount injection
+// is the dynamic-design addition.
 package hook
 
 import (

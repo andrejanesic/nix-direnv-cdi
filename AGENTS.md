@@ -28,7 +28,6 @@ A single Go binary, no runtime deps. CLI: `gen | hook | install | version`.
 | `internal/install/` | register the device dir with podman/docker (backup-then-auto) |
 | `flake.nix` | `nix run` / profile install; version-stamped static binary |
 | `docs/` | reference documentation (see `docs/readme.md`) |
-| `PLAN.md` | design history + milestones (R1–R7, all done) |
 
 ## Build & test
 

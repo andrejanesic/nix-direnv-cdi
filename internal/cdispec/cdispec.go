@@ -1,8 +1,8 @@
 // Package cdispec builds and validates the single, generic CDI device for
 // nix-direnv-cdi using the CNCF container-device-interface libraries — never
 // hand-rolled JSON. The device carries no project data: its only containerEdit
-// is a createRuntime hook that injects the dev-shell dynamically at run time
-// (PLAN §2). One device serves every project.
+// is a createRuntime hook that injects the dev-shell dynamically at run time.
+// One device serves every project.
 package cdispec
 
 import (
@@ -16,7 +16,7 @@ import (
 	specs "tags.cncf.io/container-device-interface/specs-go"
 )
 
-// Spec identity (PLAN §2). There is exactly one device, named Device, for all
+// Spec identity. There is exactly one device, named Device, for all
 // projects; Ref is the constant reference users pass to --device.
 const (
 	Vendor = "nix-direnv.cdi"
@@ -31,7 +31,7 @@ const (
 
 // Build constructs the single generic device: one createRuntime hook pointing
 // at hookBinary, and nothing else — no env, no mounts. The hook injects the
-// project's closure + dev-shell env at run time (PLAN §1, §2).
+// project's closure + dev-shell env at run time.
 func Build(hookBinary string) (*specs.Spec, error) {
 	if hookBinary == "" {
 		return nil, fmt.Errorf("empty hook binary path")
@@ -107,7 +107,7 @@ func Validate(spec *specs.Spec) error {
 
 // Write validates the spec, then serialises it to dir/FileName (0644). It
 // ensures dir is traversable (>=0755) so rootless podman can resolve it
-// (PLAN §1 gotcha). The JSON comes from the specs-go struct tags.
+// (see docs/gotchas.md). The JSON comes from the specs-go struct tags.
 func Write(spec *specs.Spec, dir string) error {
 	if err := Validate(spec); err != nil {
 		return err

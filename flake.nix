@@ -21,7 +21,7 @@
           # binary's own path (os.Executable -> /proc/self/exe) as the
           # createRuntime hook command; once installed, that resolves through
           # the profile symlink to the immutable, 0755-traversable
-          # /nix/store/.../bin/nix-direnv-cdi (PLAN milestone 8).
+          # /nix/store/.../bin/nix-direnv-cdi.
           nix-direnv-cdi = pkgs.buildGoModule {
             pname = "nix-direnv-cdi";
             inherit version;

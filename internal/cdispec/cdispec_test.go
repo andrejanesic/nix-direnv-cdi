@@ -1,6 +1,6 @@
 package cdispec
 
-// Tier A unit tests for the single generic device (PLAN §2). No container,
+// Tier A unit tests for the single generic device. No container,
 // no nix: pure spec construction + the CNCF validator.
 
 import (

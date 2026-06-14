@@ -1,6 +1,6 @@
 package main
 
-// Tier B: synthetic, nix-free integration (PLAN §5). Drives real podman with
+// Tier B: synthetic, nix-free integration. Drives real podman with
 // the generic device + a fabricated "project" (a fake prefix tool, a
 // mounts.json pointing at it, and a synthetic DIRENV_DIR/DIRENV_DIFF). Proves
 // the dynamic mechanism end-to-end without nix: the hook injects the closure

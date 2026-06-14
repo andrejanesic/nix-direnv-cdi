@@ -53,7 +53,7 @@ func build(t *testing.T) string {
 // chmodTraversable widens path and every ancestor to >=0755 so the rootless
 // createRuntime hook (running as a subuid) can traverse/read it. t.TempDir()
 // creates 0700 dirs, which otherwise yield "unresolvable CDI devices" or
-// unreadable mounts.json (PLAN §1 gotcha). Best-effort on dirs we don't own.
+// unreadable mounts.json (see docs/gotchas.md). Best-effort on dirs we don't own.
 func chmodTraversable(t *testing.T, path string) {
 	t.Helper()
 	for p := path; p != "/" && p != "." && p != ""; p = filepath.Dir(p) {

@@ -1,7 +1,6 @@
-// Package install registers the shared CDI spec directory (PLAN §2) with
-// podman and docker so a shared-mode device reference
-// (`--device nix-direnv.cdi/shell=<hash>`) resolves without a per-run
-// `--cdi-spec-dir` flag. (PLAN §3 "install", milestone 7.)
+// Package install registers the shared CDI spec directory with podman and
+// docker so the device reference (`--device nix-direnv.cdi/shell=devshell`)
+// resolves without a per-run `--cdi-spec-dir` flag.
 //
 // Strategy per runtime:
 //   - podman: write a dedicated drop-in
@@ -17,7 +16,7 @@
 // Both paths are backup-then-auto with a manual fallback: a pre-existing target
 // is copied to "<path>.bak" before being rewritten, and if backup or write
 // fails the exact change plus instructions are printed for the user to apply by
-// hand. The shared dir itself is created 0755 for traversability (PLAN §1).
+// hand. The shared dir itself is created 0755 for traversability.
 package install
 
 import (

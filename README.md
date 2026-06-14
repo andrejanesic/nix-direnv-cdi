@@ -114,5 +114,4 @@ shell decides which dev-shell, at run time.
 
 - **[docs/](docs/readme.md)** — architecture, mechanisms, data flow, design
   decisions, security, gotchas, caveats.
-- **[PLAN.md](PLAN.md)** — the full design history and milestones.
 - **[AGENTS.md](AGENTS.md)** — orientation for AI agents working in this repo.

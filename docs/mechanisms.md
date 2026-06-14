@@ -81,6 +81,24 @@ time (not baked into the spec). Resolution mirrors `command -v`:
 - **absolute path into the read-only store** → left intact (the **T9**
   limitation; see [caveats.md](caveats.md)).
 
+### Behaviour matrix (T1–T10)
+
+The additive-`PATH` contract is pinned by a numbered matrix; the test suite
+asserts against these IDs (grep `T1`…`T10` in `*_test.go`).
+
+| ID | Behaviour |
+|----|-----------|
+| T1 | entrypoint = shell → `PATH` additive (prefix prepended, image base preserved) |
+| T2 | a dev-shell-only tool is reachable via the additive `PATH` |
+| T3 | base-image tools still resolve |
+| T4 | the wrapped entrypoint execs the real binary |
+| T5 | works for `sh` — no shebang recursion |
+| T6 | control: **without** the device, `PATH` is the plain image default |
+| T7 | a dev-shell-only tool as the **bare** entrypoint runs |
+| T8 | additive `PATH` holds even when the entry is a dev-shell-only tool |
+| T9 | limitation: absolute path into a read-only mount runs but is **not** additive |
+| T10 | absolute path into the **writable** rootfs **is** wrapped |
+
 ## Putting it together (per `podman run`)
 
 1. Runtime injects the device → the hook is registered in `config.json`.

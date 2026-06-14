@@ -1,7 +1,7 @@
 // Command nix-direnv-cdi makes a project's nix-direnv dev-shell available
 // inside any OCI container (podman, docker) via one generic CDI device whose
-// createRuntime hook injects the dev-shell dynamically at run time. See PLAN.md
-// for the full design.
+// createRuntime hook injects the dev-shell dynamically at run time. See docs/
+// (start at docs/readme.md) for the full design.
 package main
 
 import (
@@ -69,7 +69,7 @@ func exitOnErr(err error) {
 // <project>/.direnv/cdi/mounts.json (the data the runtime hook bind-mounts),
 // then reports the constant device reference to attach. It needs only the
 // gcroot (not DIRENV_DIFF), so it is safe to run inside `.envrc` right after
-// `use flake`. (PLAN §3 "gen".)
+// `use flake`.
 func cmdGen(args []string) error {
 	fs := flag.NewFlagSet("gen", flag.ContinueOnError)
 	out := fs.String("out", "", "output dir for mounts.json (default: <project>/.direnv/cdi)")
@@ -105,7 +105,7 @@ func cmdGen(args []string) error {
 }
 
 // sharedSpecDir resolves the shared CDI spec directory: $XDG_CONFIG_HOME/cdi,
-// falling back to ~/.config/cdi. (PLAN §2 shared placement.)
+// falling back to ~/.config/cdi.
 func sharedSpecDir() (string, error) {
 	if xdg := os.Getenv("XDG_CONFIG_HOME"); xdg != "" {
 		return filepath.Join(xdg, "cdi"), nil
@@ -119,7 +119,7 @@ func sharedSpecDir() (string, error) {
 
 // cmdHook runs the createRuntime hook. It is best-effort: any error is reported
 // to stderr but the process still exits 0, so a failure never breaks the
-// container. (PLAN §1, §3 "hook", milestone 3.)
+// container.
 func cmdHook(args []string) {
 	fs := flag.NewFlagSet("hook", flag.ContinueOnError)
 	if err := fs.Parse(args); err != nil {
@@ -133,9 +133,9 @@ func cmdHook(args []string) {
 
 // cmdInstall writes the single generic CDI device to the shared CDI dir (its
 // hook path = this installed binary) and registers that dir with podman and
-// docker so `--device nix-direnv.cdi/shell=devshell` resolves. (PLAN §2, §3
-// "install".) Run once per machine. Best-effort registration: per-runtime
-// failures fall back to printed manual instructions.
+// docker so `--device nix-direnv.cdi/shell=devshell` resolves. Run once per
+// machine. Best-effort registration: per-runtime failures fall back to printed
+// manual instructions.
 func cmdInstall(args []string) error {
 	fs := flag.NewFlagSet("install", flag.ContinueOnError)
 	if err := fs.Parse(args); err != nil {

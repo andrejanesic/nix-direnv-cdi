@@ -1,6 +1,6 @@
 package main
 
-// Tier C: real-flake end-to-end (PLAN §5). Materialises the committed fixture
+// Tier C: real-flake end-to-end. Materialises the committed fixture
 // dev-shell (provides `hello`), runs the real install/gen flow, and propagates
 // the dev-shell into a stock busybox via the generic device. Asserts the real
 // nix tool runs inside the container and PATH is additive. Gated on

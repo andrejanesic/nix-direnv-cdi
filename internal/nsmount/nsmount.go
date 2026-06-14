@@ -1,5 +1,5 @@
 // Package nsmount injects bind mounts into a running container by entering its
-// mount namespace (PLAN §1 "dynamic mount injection"). It is the consumer half
+// mount namespace (see docs/mechanisms.md). It is the consumer half
 // of the dynamic design: the createRuntime hook calls BindAll to bind-mount the
 // dev-shell closure read-only into the container the runtime just created.
 //

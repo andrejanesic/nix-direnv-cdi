@@ -1,8 +1,9 @@
 # Design decisions
 
 Why the tool is shaped the way it is. Each decision records the alternative(s)
-rejected and why. The full exploration (with empirical findings) is in
-[../PLAN.md](../PLAN.md).
+rejected and why. The empirical findings behind these choices are distilled in
+[gotchas.md](gotchas.md) and [caveats.md](caveats.md); the original design
+exploration is preserved in the git history.
 
 ## D1 — One generic device, not one per project
 
