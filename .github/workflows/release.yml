@@ -1,0 +1,87 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+jobs:
+  release:
+    name: Build and publish release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Test
+        run: |
+          go build ./...
+          go vet ./...
+          go test ./... -skip '^(TestSynthetic|TestE2E)'
+
+      - name: Build binaries
+        env:
+          VERSION: ${{ github.ref_name }}
+          COMMIT: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          short_commit="${COMMIT::7}"
+          build_date="$(date -u +%Y%m%dT%H%M%SZ)"
+
+          for target in linux/amd64 linux/arm64; do
+            os="${target%/*}"
+            arch="${target#*/}"
+            out="dist/nix-direnv-cdi_${VERSION}_${os}_${arch}"
+            GOOS="${os}" GOARCH="${arch}" CGO_ENABLED=0 go build \
+              -trimpath \
+              -ldflags="-s -w -X main.version=${VERSION} -X main.commit=${short_commit} -X main.buildDate=${build_date}" \
+              -o "${out}" .
+          done
+
+          (cd dist && sha256sum nix-direnv-cdi_* > SHA256SUMS)
+
+      - name: Sign artifacts
+        env:
+          COSIGN_YES: "true"
+        run: |
+          set -euo pipefail
+          for artifact in dist/nix-direnv-cdi_* dist/SHA256SUMS; do
+            cosign sign-blob "${artifact}" \
+              --output-signature "${artifact}.sig" \
+              --bundle "${artifact}.bundle"
+          done
+
+      - name: Attest binaries
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            dist/nix-direnv-cdi_${{ github.ref_name }}_linux_amd64
+            dist/nix-direnv-cdi_${{ github.ref_name }}_linux_arm64
+            dist/SHA256SUMS
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          gh release view "${VERSION}" >/dev/null 2>&1 || \
+            gh release create "${VERSION}" --title "${VERSION}" --notes-file CHANGELOG.md
+          gh release upload "${VERSION}" dist/* --clobber

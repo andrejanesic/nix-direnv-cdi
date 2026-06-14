@@ -1,0 +1,220 @@
+# Release & distribution
+
+This document defines how `nix-direnv-cdi` is versioned, released, installed,
+verified, upgraded, and rolled back.
+
+## Versioning
+
+Tagged releases use SemVer tags of the form `vMAJOR.MINOR.PATCH`, for example
+`v0.1.0`.
+
+Breaking changes include:
+
+- changing or removing CLI commands, flags, output contracts, or exit behavior
+- changing the CDI device reference `nix-direnv-cdi.org/env=current`
+- changing installer-owned paths or unregister behavior
+- changing runtime support claims for podman or docker
+- changing the hook authorization model, especially the `DIRENV_DIR` gate
+- changing the on-disk `mounts.json` format without compatibility handling
+
+Released binaries print the release tag first and include source identity for
+traceability:
+
+```console
+$ nix-direnv-cdi version
+nix-direnv-cdi v0.1.0 (commit abc1234, built 20260615)
+```
+
+Development builds may print `dev` or a Git revision instead of a tag.
+
+## Distribution channels
+
+Supported release channels:
+
+- Nix flake app: `nix run github:andrejanesic/nix-direnv-cdi/vX.Y.Z -- install`
+- Nix profile package:
+  `nix profile install github:andrejanesic/nix-direnv-cdi/vX.Y.Z`
+- GitHub Release binaries for `x86_64-linux` and `aarch64-linux`
+- GitHub-generated source archives attached to each release
+
+The GitHub-generated source archives are source snapshots, not the tested binary
+artifacts. The tested standalone artifacts are the Linux binaries uploaded by
+the release workflow.
+
+## Artifact naming
+
+Standalone binaries use this pattern:
+
+```text
+nix-direnv-cdi_<version>_linux_<arch>
+```
+
+Examples:
+
+```text
+nix-direnv-cdi_v0.1.0_linux_amd64
+nix-direnv-cdi_v0.1.0_linux_arm64
+```
+
+Each release also publishes:
+
+- `SHA256SUMS`
+- a cosign keyless signature and bundle for each binary
+- a cosign keyless signature and bundle for `SHA256SUMS`
+- GitHub artifact provenance attestations
+
+## Install
+
+Recommended Nix install:
+
+```sh
+nix profile install github:andrejanesic/nix-direnv-cdi/v0.1.0
+nix-direnv-cdi install
+```
+
+One-shot install without adding the package to a profile:
+
+```sh
+nix run github:andrejanesic/nix-direnv-cdi/v0.1.0 -- install
+```
+
+Standalone binary install:
+
+```sh
+install -m 0755 nix-direnv-cdi_v0.1.0_linux_amd64 ~/.local/bin/nix-direnv-cdi
+nix-direnv-cdi install
+```
+
+Run `nix-direnv-cdi install` after installing or upgrading the binary. The CDI
+spec embeds the installed binary path as the `createRuntime` hook path, so the
+machine-level registration should be refreshed when the package path changes.
+
+## Verify artifacts
+
+Verify checksums:
+
+```sh
+sha256sum -c SHA256SUMS
+```
+
+Verify GitHub artifact provenance:
+
+```sh
+gh attestation verify nix-direnv-cdi_v0.1.0_linux_amd64 \
+  --repo andrejanesic/nix-direnv-cdi
+```
+
+Verify cosign keyless signatures with the release workflow identity:
+
+```sh
+cosign verify-blob nix-direnv-cdi_v0.1.0_linux_amd64 \
+  --bundle nix-direnv-cdi_v0.1.0_linux_amd64.bundle \
+  --certificate-identity-regexp 'https://github.com/andrejanesic/nix-direnv-cdi/.github/workflows/release.yml@refs/tags/v.*' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+```
+
+Use the same pattern for `SHA256SUMS` and the `aarch64` binary.
+
+Confirm the installed version:
+
+```sh
+nix-direnv-cdi version
+```
+
+## Upgrade
+
+Nix profile upgrade:
+
+```sh
+nix profile upgrade nix-direnv-cdi
+nix-direnv-cdi install
+nix-direnv-cdi version
+```
+
+Pinned Nix upgrade:
+
+```sh
+nix profile remove nix-direnv-cdi
+nix profile install github:andrejanesic/nix-direnv-cdi/v0.2.0
+nix-direnv-cdi install
+```
+
+Standalone binary upgrade:
+
+```sh
+install -m 0755 nix-direnv-cdi_v0.2.0_linux_amd64 ~/.local/bin/nix-direnv-cdi
+nix-direnv-cdi install
+nix-direnv-cdi version
+```
+
+## Rollback
+
+Package rollback is distinct from unregistering the machine-level CDI device.
+
+For Nix profiles, use profile generations:
+
+```sh
+nix profile history
+nix profile rollback
+nix-direnv-cdi install
+```
+
+Or reinstall a pinned release:
+
+```sh
+nix profile remove nix-direnv-cdi
+nix profile install github:andrejanesic/nix-direnv-cdi/v0.1.0
+nix-direnv-cdi install
+```
+
+For standalone binaries, reinstall the previous binary and rerun:
+
+```sh
+nix-direnv-cdi install
+```
+
+Use `nix-direnv-cdi uninstall` only when unregistering the CDI device from the
+machine. It removes this tool's owned CDI spec, podman drop-in, and Docker
+system CDI spec; it is not a package rollback command.
+
+## Changelog
+
+Maintain `CHANGELOG.md` with these categories as needed:
+
+- Added
+- Changed
+- Fixed
+- Security
+- Known Issues
+
+Release notes must explicitly call out runtime support changes and installer
+behavior changes.
+
+## Release checklist
+
+Before tagging:
+
+- Confirm `README.md`, `docs/`, `AGENTS.md`, and CLI usage agree on the command
+  set and supported distribution channels.
+- Update `CHANGELOG.md`.
+- Run `go build ./...`.
+- Run `go vet ./...`.
+- Run unit tests:
+  `go test ./... -skip '^(TestSynthetic|TestE2E)'`.
+- Run runtime validation for docker and podman:
+  `NDC_CONTAINER_CLI=docker go test ./integration -run '^TestE2E'`
+  and `NDC_CONTAINER_CLI=podman go test ./integration -run '^TestE2E'`.
+- Run installer lifecycle validation:
+  `go test ./... -run 'Install|Uninstall|Registration'`.
+- Run `nix build .#nix-direnv-cdi`.
+- Confirm the built binary reports the intended version.
+
+Tag and publish:
+
+- Create an annotated SemVer tag, for example `git tag -a v0.1.0`.
+- Push the tag.
+- Let the release workflow create or update the GitHub Release.
+- Confirm binaries, checksums, cosign signatures, bundles, and attestations are
+  present.
+- Verify at least one uploaded binary from the release page before announcing.
+

@@ -10,6 +10,30 @@ import (
 	"github.com/andrejanesic/nix-direnv-cdi/internal/cdispec"
 )
 
+func TestFormatVersion_Default(t *testing.T) {
+	oldVersion, oldCommit, oldBuildDate := version, commit, buildDate
+	t.Cleanup(func() {
+		version, commit, buildDate = oldVersion, oldCommit, oldBuildDate
+	})
+
+	version, commit, buildDate = "dev", "unknown", "unknown"
+	if got, want := formatVersion(), "nix-direnv-cdi dev"; got != want {
+		t.Fatalf("formatVersion() = %q, want %q", got, want)
+	}
+}
+
+func TestFormatVersion_ReleaseMetadata(t *testing.T) {
+	oldVersion, oldCommit, oldBuildDate := version, commit, buildDate
+	t.Cleanup(func() {
+		version, commit, buildDate = oldVersion, oldCommit, oldBuildDate
+	})
+
+	version, commit, buildDate = "v0.1.0", "abc1234", "20260615"
+	if got, want := formatVersion(), "nix-direnv-cdi v0.1.0 (commit abc1234, built 20260615)"; got != want {
+		t.Fatalf("formatVersion() = %q, want %q", got, want)
+	}
+}
+
 func TestCLIInstallUninstallSmoke(t *testing.T) {
 	if dockerHostConfigExistsForSmoke() {
 		t.Skip("host /etc/docker exists; CLI install has no flag to redirect Docker system CDI spec safely")

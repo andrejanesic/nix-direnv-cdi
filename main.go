@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/andrejanesic/nix-direnv-cdi/internal/cdispec"
 	"github.com/andrejanesic/nix-direnv-cdi/internal/devshell"
@@ -16,8 +17,13 @@ import (
 	"github.com/andrejanesic/nix-direnv-cdi/internal/install"
 )
 
-// version is overridden at build time via -ldflags "-X main.version=...".
-var version = "dev"
+// These are overridden at build time via -ldflags. Release builds set version
+// to the tag and commit to the short Git revision.
+var (
+	version   = "dev"
+	commit    = "unknown"
+	buildDate = "unknown"
+)
 
 const usage = `nix-direnv-cdi — expose a nix-direnv dev-shell inside any OCI container via a CDI device.
 
@@ -52,13 +58,28 @@ func main() {
 	case "uninstall":
 		exitOnErr(cmdUninstall(args))
 	case "version":
-		fmt.Printf("nix-direnv-cdi %s\n", version)
+		fmt.Println(formatVersion())
 	case "-h", "--help", "help":
 		fmt.Println(usage)
 	default:
 		fmt.Fprintf(os.Stderr, "unknown command %q\n\n%s\n", cmd, usage)
 		os.Exit(2)
 	}
+}
+
+func formatVersion() string {
+	out := "nix-direnv-cdi " + version
+	var fields []string
+	if commit != "" && commit != "unknown" {
+		fields = append(fields, "commit "+commit)
+	}
+	if buildDate != "" && buildDate != "unknown" {
+		fields = append(fields, "built "+buildDate)
+	}
+	if len(fields) > 0 {
+		out += " (" + strings.Join(fields, ", ") + ")"
+	}
+	return out
 }
 
 func exitOnErr(err error) {

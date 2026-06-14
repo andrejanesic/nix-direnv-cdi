@@ -65,6 +65,14 @@ nix run github:andrejanesic/nix-direnv-cdi -- install
 # or: nix profile install github:andrejanesic/nix-direnv-cdi && nix-direnv-cdi install
 ```
 
+For a released version, pin the tag:
+
+```sh
+nix profile install github:andrejanesic/nix-direnv-cdi/v0.1.0
+nix-direnv-cdi install
+nix-direnv-cdi version
+```
+
 For Docker, `install` uses the daemon-scanned system CDI spec path
 `/etc/cdi/nix-direnv.json`. Docker is system-wide, so the installer does not add
 your per-user `~/.config/cdi` directory to `/etc/docker/daemon.json`.
@@ -180,10 +188,19 @@ Backup behavior is limited and predictable:
 Docker `daemon.json` is only relevant for an advanced manual custom CDI
 directory setup; changing that file may require a Docker restart.
 
+Package rollback is separate from unregistering the CDI device. For Nix
+profiles, use Nix profile generations or reinstall a pinned release, then rerun
+`nix-direnv-cdi install` so the CDI spec points at the active binary. See
+[docs/release.md](docs/release.md) for release install, verification, upgrade,
+and rollback commands.
+
 ## Documentation
 
 - **[docs/](docs/readme.md)** — architecture, mechanisms (incl. data flow),
   design decisions, security, limitations, internals.
+- **[docs/release.md](docs/release.md)** — release channels, artifact
+  verification, upgrade, rollback, and maintainer checklist.
+- **[CHANGELOG.md](CHANGELOG.md)** — release notes.
 - **[CONTRIBUTING.md](CONTRIBUTING.md)** — build, test, and integration
   validation commands.
 - **[AGENTS.md](AGENTS.md)** — orientation for AI agents working in this repo.

@@ -93,3 +93,11 @@ go test ./... -skip '^(TestSynthetic|TestE2E)'
 `createRuntime` hook output is normally hidden by the container runtime. Set
 `NDC_HOOK_LOG=<file>` in the launching environment to append a hook trace with
 the gate decision, mounts, and `DIRENV_DIFF` decoding.
+
+## Releases
+
+Release policy, artifact verification, upgrade/rollback instructions, and the
+maintainer checklist live in [docs/release.md](docs/release.md). Tagged releases
+use SemVer tags such as `v0.1.0`, publish Nix install paths plus standalone
+Linux binaries, and include checksums, cosign keyless signatures, and GitHub
+artifact provenance.

@@ -7,10 +7,17 @@
     let
       systems = [ "x86_64-linux" "aarch64-linux" ];
       forAllSystems = nixpkgs.lib.genAttrs systems;
-      # Version: the flake's own git rev when clean, dirty rev when not, else
-      # "dev". Stamped into the binary via -ldflags so `nix-direnv-cdi version`
-      # reports something traceable.
-      version = self.shortRev or self.dirtyShortRev or "dev";
+      sourceRef = self.ref or "";
+      isReleaseRef = builtins.match "v[0-9]+\\.[0-9]+\\.[0-9]+.*" sourceRef != null;
+      # Version metadata stamped into the binary. Pinned tag refs report the
+      # SemVer tag when Nix exposes it; otherwise the build remains traceable by
+      # revision.
+      version =
+        if isReleaseRef
+        then sourceRef
+        else self.shortRev or self.dirtyShortRev or "dev";
+      commit = self.shortRev or self.dirtyShortRev or "unknown";
+      buildDate = self.lastModifiedDate or "unknown";
     in {
       packages = forAllSystems (system:
         let pkgs = nixpkgs.legacyPackages.${system};
@@ -30,7 +37,13 @@
             # nixpkgs.lib.fakeHash, build, copy the "got:" hash from the error.
             vendorHash = "sha256-6zq/Gv1EsuMegTZwX8vOY9xWDpvgI3k/KD8WNLuOGCs=";
             env.CGO_ENABLED = 0;
-            ldflags = [ "-s" "-w" "-X main.version=${version}" ];
+            ldflags = [
+              "-s"
+              "-w"
+              "-X main.version=${version}"
+              "-X main.commit=${commit}"
+              "-X main.buildDate=${buildDate}"
+            ];
             # Tests are tiered (Tier B/C need podman/nix/direnv) and gated at
             # runtime; the build sandbox has none, so don't run them here.
             doCheck = false;

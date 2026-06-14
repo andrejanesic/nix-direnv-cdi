@@ -13,7 +13,8 @@ hook, which inherits the loaded direnv environment, **bind-mounts the dev-shell'
 **wraps the entrypoint** for additive `PATH` + dev-shell env. One device serves
 every project; the launching shell decides which dev-shell at run time.
 
-A single Go binary, no runtime deps. CLI: `gen | hook | install | version`.
+A single Go binary, no runtime deps. CLI:
+`gen | hook | install | uninstall | version`.
 
 ## Repo map
 

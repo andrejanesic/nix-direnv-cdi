@@ -12,6 +12,7 @@ top-level [README](../README.md).
 | [design-decisions.md](design-decisions.md) | everyone | Why it's shaped this way, with the alternatives considered and rejected. |
 | [security.md](security.md) | users | The authorization model (the gate), exposure surface, read-only mounts, and secrets handling. |
 | [limitations.md](limitations.md) | users | Limitations, non-goals, the runtime support matrix, and troubleshooting. |
+| [release.md](release.md) | users + maintainers | Release channels, artifact verification, upgrade, rollback, and the release checklist. |
 | [internals.md](internals.md) | maintainers | The non-obvious, load-bearing kernel/Go traps the implementation depends on. |
 
 ## Suggested reading order
