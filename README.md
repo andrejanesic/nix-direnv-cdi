@@ -65,6 +65,19 @@ nix run github:andrejanesic/nix-direnv-cdi -- install
 # or: nix profile install github:andrejanesic/nix-direnv-cdi && nix-direnv-cdi install
 ```
 
+If Docker is configured, restart it after `install` so daemon config changes are
+loaded:
+
+```sh
+sudo systemctl restart docker
+```
+
+Minimal smoke test:
+
+```sh
+podman run --rm --device nix-direnv-cdi.org/env=current busybox true
+```
+
 **2. In your project's `.envrc`:**
 
 ```sh
@@ -112,6 +125,14 @@ shell decides which dev-shell, at run time.
 - **Docker daemon env.** Docker runs containers through a daemon, so pass
   `DIRENV_DIR` and `DIRENV_DIFF` through (`--env DIRENV_DIR --env DIRENV_DIFF`,
   or the Compose `environment` keys above) when using Docker directly.
+- **Uninstall.** `nix-direnv-cdi uninstall` removes only this tool's owned
+  artifacts: `~/.config/cdi/nix-direnv.json`, the podman drop-in
+  `~/.config/containers/containers.conf.d/nix-direnv-cdi.conf`, and this shared
+  CDI dir from Docker's `/etc/docker/daemon.json`. Restart Docker afterwards if
+  that file changed. Manual rollback is the same set of edits: delete the owned
+  podman drop-in and generic CDI spec, then remove only the
+  `$XDG_CONFIG_HOME/cdi` (or `~/.config/cdi`) entry from Docker's
+  `cdi-spec-dirs`, preserving unrelated settings and directories.
 - **Limitation (T9).** An absolute path *into* the read-only store runs but isn't
   made additive — run dev-shell tools by name.
 

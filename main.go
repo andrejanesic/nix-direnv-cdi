@@ -28,6 +28,7 @@ Commands:
   gen        Write the project's dev-shell closure to .direnv/cdi/mounts.json
   hook       createRuntime hook: inject the dev-shell into the container (best-effort)
   install    Register the generic CDI device with podman/docker (one-time)
+  uninstall  Remove the generic CDI device and unregister it from podman/docker
   version    Print version information
 
 Run "nix-direnv-cdi <command> -h" for command-specific flags.`
@@ -48,6 +49,8 @@ func main() {
 		cmdHook(args)
 	case "install":
 		exitOnErr(cmdInstall(args))
+	case "uninstall":
+		exitOnErr(cmdUninstall(args))
 	case "version":
 		fmt.Printf("nix-direnv-cdi %s\n", version)
 	case "-h", "--help", "help":
@@ -166,4 +169,25 @@ func cmdInstall(args []string) error {
 		return err
 	}
 	return install.Run(paths, os.Stdout)
+}
+
+// cmdUninstall removes the single generic CDI device and unregisters the shared
+// CDI dir from podman/docker. It only removes files/settings owned by this tool:
+// the nix-direnv.json spec, the podman drop-in, and this shared dir entry in
+// docker's cdi-spec-dirs.
+func cmdUninstall(args []string) error {
+	fs := flag.NewFlagSet("uninstall", flag.ContinueOnError)
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	sharedDir, err := sharedSpecDir()
+	if err != nil {
+		return err
+	}
+	paths, err := install.DefaultPaths(sharedDir)
+	if err != nil {
+		return err
+	}
+	return install.Uninstall(paths, os.Stdout)
 }

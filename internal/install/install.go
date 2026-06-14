@@ -30,6 +30,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/andrejanesic/nix-direnv-cdi/internal/cdispec"
 )
 
 // defaultSpecDirs are the CDI spec dirs both runtimes scan out of the box. We
@@ -90,6 +92,88 @@ func Run(p Paths, w io.Writer) error {
 		fmt.Fprintln(w, "docker: not detected; if you use docker, apply manually:")
 		printDockerManual(w, p.SharedDir, p.DockerDaemonJSON)
 	}
+	return nil
+}
+
+// Uninstall removes this tool's owned CDI registration artifacts. It is
+// idempotent: missing files/settings are reported as already absent. Docker is
+// edited only when it is detected or daemon.json already exists.
+func Uninstall(p Paths, w io.Writer) error {
+	fmt.Fprintf(w, "shared CDI spec dir: %s\n", p.SharedDir)
+
+	specPath := filepath.Join(p.SharedDir, cdispec.FileName)
+	if err := uninstallSpec(specPath, w); err != nil {
+		return err
+	}
+
+	if err := uninstallPodman(p.PodmanDropin, w); err != nil {
+		fmt.Fprintf(w, "podman: could not auto-unregister (%v); remove manually:\n", err)
+		printPodmanUninstallManual(w, p.PodmanDropin)
+	}
+
+	if dockerPresent() || fileExists(p.DockerDaemonJSON) {
+		if err := uninstallDocker(p.DockerDaemonJSON, p.SharedDir, w); err != nil {
+			fmt.Fprintf(w, "docker: could not auto-unregister (%v); apply manually:\n", err)
+			printDockerUninstallManual(w, p.SharedDir, p.DockerDaemonJSON)
+		}
+	} else {
+		fmt.Fprintln(w, "docker: not detected and daemon.json absent; no-op")
+	}
+	return nil
+}
+
+func uninstallSpec(specPath string, w io.Writer) error {
+	if err := os.Remove(specPath); err == nil {
+		fmt.Fprintf(w, "cdi: removed %s\n", specPath)
+		return nil
+	} else if errors.Is(err, fs.ErrNotExist) {
+		fmt.Fprintf(w, "cdi: already absent (%s)\n", specPath)
+		return nil
+	} else {
+		return fmt.Errorf("remove %s: %w", specPath, err)
+	}
+}
+
+func uninstallPodman(dropinPath string, w io.Writer) error {
+	if err := os.Remove(dropinPath); err == nil {
+		fmt.Fprintf(w, "podman: removed %s\n", dropinPath)
+		return nil
+	} else if errors.Is(err, fs.ErrNotExist) {
+		fmt.Fprintf(w, "podman: already absent (%s)\n", dropinPath)
+		return nil
+	} else {
+		return err
+	}
+}
+
+func uninstallDocker(daemonPath, sharedDir string, w io.Writer) error {
+	existing, err := os.ReadFile(daemonPath)
+	if errors.Is(err, fs.ErrNotExist) {
+		fmt.Fprintf(w, "docker: daemon.json absent; no-op (%s)\n", daemonPath)
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+
+	merged, changed, err := removeDockerSpecDir(existing, sharedDir)
+	if err != nil {
+		return err
+	}
+	if !changed {
+		fmt.Fprintf(w, "docker: already unregistered (%s)\n", daemonPath)
+		return nil
+	}
+
+	bak, berr := backupFile(daemonPath)
+	if berr != nil {
+		return fmt.Errorf("backup %s: %w", daemonPath, berr)
+	}
+	fmt.Fprintf(w, "docker: backed up %s -> %s\n", daemonPath, bak)
+	if err := os.WriteFile(daemonPath, merged, 0o644); err != nil {
+		return err
+	}
+	fmt.Fprintf(w, "docker: unregistered %s\n  (wrote %s; restart to apply: sudo systemctl restart docker)\n", sharedDir, daemonPath)
 	return nil
 }
 
@@ -197,6 +281,54 @@ func mergeDockerSpecDirs(existing []byte, sharedDir string) (out []byte, changed
 	return append(b, '\n'), true, nil
 }
 
+// removeDockerSpecDir returns daemon.json content with sharedDir removed from
+// "cdi-spec-dirs", preserving every other key and every other dir in its
+// original order. changed is false when the file is already unregistered.
+func removeDockerSpecDir(existing []byte, sharedDir string) (out []byte, changed bool, err error) {
+	cfg := map[string]any{}
+	if len(bytes.TrimSpace(existing)) > 0 {
+		if err := json.Unmarshal(existing, &cfg); err != nil {
+			return nil, false, fmt.Errorf("parse daemon.json: %w", err)
+		}
+	}
+
+	v, ok := cfg["cdi-spec-dirs"]
+	if !ok || v == nil {
+		return nil, false, nil
+	}
+	rawDirs, ok := v.([]any)
+	if !ok {
+		return nil, false, fmt.Errorf("daemon.json: cdi-spec-dirs is not an array")
+	}
+
+	dirs := make([]string, 0, len(rawDirs))
+	for _, e := range rawDirs {
+		s, ok := e.(string)
+		if !ok {
+			return nil, false, fmt.Errorf("daemon.json: cdi-spec-dirs has a non-string entry %v", e)
+		}
+		if s == sharedDir {
+			changed = true
+			continue
+		}
+		dirs = append(dirs, s)
+	}
+	if !changed {
+		return nil, false, nil
+	}
+	if len(dirs) == 0 {
+		delete(cfg, "cdi-spec-dirs")
+	} else {
+		cfg["cdi-spec-dirs"] = dirs
+	}
+
+	b, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return nil, false, err
+	}
+	return append(b, '\n'), true, nil
+}
+
 // podmanDropinContent is the full, canonical text of our containers.conf.d
 // drop-in for sharedDir. The defaults are listed so the result is correct
 // whether podman replaces or appends the array on merge.
@@ -244,6 +376,11 @@ func dockerPresent() bool {
 	return false
 }
 
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
+
 func printPodmanManual(w io.Writer, sharedDir, dropin string) {
 	fmt.Fprintf(w, "  create %s with:\n\n%s\n", dropin, indent(podmanDropinContent(sharedDir)))
 }
@@ -253,6 +390,16 @@ func printDockerManual(w io.Writer, sharedDir, daemonPath string) {
 	fmt.Fprintf(w, "  add %q to \"cdi-spec-dirs\" in %s (create it if absent), e.g.:\n\n%s\n", sharedDir, daemonPath, indent(string(snippet)))
 	fmt.Fprintln(w, "  then: sudo systemctl restart docker")
 	fmt.Fprintln(w, "  (docker <28.3 also needs \"features\": { \"cdi\": true } in the same file.)")
+}
+
+func printPodmanUninstallManual(w io.Writer, dropin string) {
+	fmt.Fprintf(w, "  remove %s\n", dropin)
+}
+
+func printDockerUninstallManual(w io.Writer, sharedDir, daemonPath string) {
+	fmt.Fprintf(w, "  remove only %q from \"cdi-spec-dirs\" in %s.\n", sharedDir, daemonPath)
+	fmt.Fprintln(w, "  preserve all other keys and CDI directories, then restart docker:")
+	fmt.Fprintln(w, "  sudo systemctl restart docker")
 }
 
 // indent prefixes every non-empty line with four spaces for readable snippets.

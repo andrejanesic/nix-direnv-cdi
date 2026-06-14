@@ -25,7 +25,7 @@ end-to-end timeline.
 ## Components
 
 ```
-main.go                 # subcommand dispatch: gen | hook | install | version
+main.go                 # subcommand dispatch: gen | hook | install | uninstall | version
 internal/
   cdispec/              # build + validate + write the single generic device (CNCF libs)
   devshell/             # closure (gcroot -> nix-store -qR); decode DIRENV_DIFF (prefix+env);
@@ -33,7 +33,7 @@ internal/
   hook/                 # the createRuntime hook: gate -> mount-inject -> wrap entrypoint
   nsmount/              # enter the container's mount ns and bind-mount the closure
   ociconfig/            # read OCI State (stdin) + the bundle's config.json
-  install/              # register the generic device dir with podman/docker
+  install/              # register/unregister the generic device dir with podman/docker
 flake.nix               # nix run / profile install; version-stamped static binary
 contrib/use_cdi.sh      # optional direnvrc `use cdi` helper
 ```
@@ -45,6 +45,11 @@ contrib/use_cdi.sh      # optional direnvrc `use cdi` helper
   (`containers.conf.d` drop-in) and docker (`daemon.json`) — backing up any
   existing config first and printing the manual steps if it can't apply them
   (e.g. docker's root-owned `daemon.json`). One-time per machine.
+- **`uninstall`** — remove only the generic CDI spec
+  `~/.config/cdi/nix-direnv.json`, the owned podman drop-in, and this tool's
+  shared CDI dir entry from Docker's `cdi-spec-dirs`. It preserves unrelated
+  Docker keys and other CDI dirs, backs up Docker config before rewriting, and
+  prints manual rollback steps if daemon JSON cannot be edited safely.
 - **`gen`** — resolve the gcroot under `.direnv/flake-profile-*`, walk the
   closure (`nix-store -qR`), write `.direnv/cdi/mounts.json`, and report the
   constant device reference. Needs no `DIRENV_DIFF`, so it runs inside
@@ -60,6 +65,8 @@ contrib/use_cdi.sh      # optional direnvrc `use cdi` helper
 | Artifact | Produced by | Contents |
 |----------|-------------|----------|
 | `~/.config/cdi/nix-direnv.json` | `install` | the one generic device (hook only) |
+| `~/.config/containers/containers.conf.d/nix-direnv-cdi.conf` | `install` | podman drop-in registering the shared CDI dir |
+| `/etc/docker/daemon.json` `cdi-spec-dirs` entry for `~/.config/cdi` | `install` | docker registration; Docker must be restarted after changes |
 | `<project>/.direnv/cdi/mounts.json` | `gen` | `{"closure": ["/nix/store/…", …]}` |
 
 ## See also
