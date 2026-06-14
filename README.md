@@ -89,6 +89,14 @@ services:
   dev-shell you haven't entered (and thus approved via `direnv allow`).
 - **Runtimes:** verified on rootless **podman** (crun) and **runc**. Docker uses
   runc, so it is expected to work; a real moby end-to-end smoke test is pending.
+- **Rootful podman / running as root:** the mount mechanism is *easier* as root
+  (real `CAP_SYS_ADMIN`, no userns barrier) and the read-only remount that's
+  refused under rootless *succeeds*, so the closure is properly read-only. But
+  the hook reads `DIRENV_DIR`/`DIRENV_DIFF` from its inherited environment, and
+  **`sudo` strips those** — so `sudo podman run …` leaves the device inert.
+  Preserve them: `sudo -E podman run …` (or
+  `sudo --preserve-env=DIRENV_DIR,DIRENV_DIFF podman run …`), or run from a root
+  shell that already has the dev-shell loaded.
 - **Read-only:** closure mounts are best-effort read-only. Under a rootless user
   namespace the ro-remount is refused, but nix store paths are immutable and
   mode `0555` on the host, so they're effectively read-only regardless.
