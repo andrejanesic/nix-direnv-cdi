@@ -40,16 +40,23 @@ contrib/use_cdi.sh      # optional direnvrc `use cdi` helper
 
 ## Subcommands
 
-- **`install`** — write the generic device to `~/.config/cdi/nix-direnv.json`
-  (hook `path` = the installed binary) and register that directory with podman
-  (`containers.conf.d` drop-in) and docker (`daemon.json`) — backing up any
-  existing config first and printing the manual steps if it can't apply them
-  (e.g. docker's root-owned `daemon.json`). One-time per machine.
+- **`install`** — write the generic device to
+  `$XDG_CONFIG_HOME/cdi/nix-direnv.json` (or `~/.config/cdi/nix-direnv.json`;
+  hook `path` = the installed binary) and register that directory with podman
+  (an owned `containers.conf.d` drop-in) and docker (`daemon.json`) — backing up
+  any existing config first and printing the manual steps if it can't apply them
+  (e.g. docker's root-owned `daemon.json`). Restart Docker after install if
+  `/etc/docker/daemon.json` changed. One-time per machine.
 - **`uninstall`** — remove only the generic CDI spec
-  `~/.config/cdi/nix-direnv.json`, the owned podman drop-in, and this tool's
-  shared CDI dir entry from Docker's `cdi-spec-dirs`. It preserves unrelated
-  Docker keys and other CDI dirs, backs up Docker config before rewriting, and
-  prints manual rollback steps if daemon JSON cannot be edited safely.
+  `$XDG_CONFIG_HOME/cdi/nix-direnv.json` (or `~/.config/cdi/nix-direnv.json`),
+  the owned podman drop-in, and this tool's shared CDI dir entry from Docker's
+  `cdi-spec-dirs`. It preserves unrelated Docker keys and other CDI dirs,
+  removes the Docker key instead of leaving an empty array when this was the
+  only CDI dir, backs up Docker config before rewriting, and prints manual
+  rollback steps if daemon JSON cannot be edited safely. Restart Docker after
+  uninstall if `/etc/docker/daemon.json` changed. See the top-level
+  [README](../README.md#uninstall-and-manual-rollback) for manual rollback and
+  backup recovery steps.
 - **`gen`** — resolve the gcroot under `.direnv/flake-profile-*`, walk the
   closure (`nix-store -qR`), write `.direnv/cdi/mounts.json`, and report the
   constant device reference. Needs no `DIRENV_DIFF`, so it runs inside
@@ -64,9 +71,10 @@ contrib/use_cdi.sh      # optional direnvrc `use cdi` helper
 
 | Artifact | Produced by | Contents |
 |----------|-------------|----------|
-| `~/.config/cdi/nix-direnv.json` | `install` | the one generic device (hook only) |
-| `~/.config/containers/containers.conf.d/nix-direnv-cdi.conf` | `install` | podman drop-in registering the shared CDI dir |
-| `/etc/docker/daemon.json` `cdi-spec-dirs` entry for `~/.config/cdi` | `install` | docker registration; Docker must be restarted after changes |
+| `$XDG_CONFIG_HOME/cdi` (or `~/.config/cdi`) | `install` | shared CDI spec directory; `uninstall` removes the owned spec file inside it, not the directory itself |
+| `$XDG_CONFIG_HOME/cdi/nix-direnv.json` (or `~/.config/cdi/nix-direnv.json`) | `install` | the one generic device (hook only); removed by `uninstall` |
+| `$XDG_CONFIG_HOME/containers/containers.conf.d/nix-direnv-cdi.conf` (or `~/.config/containers/...`) | `install` | owned podman drop-in registering the shared CDI dir; only this drop-in should be removed during rollback |
+| `/etc/docker/daemon.json` `cdi-spec-dirs` entry for the shared CDI dir | `install` | docker registration; preserve other keys and CDI dirs, remove the key if this was the only CDI dir, and restart Docker after changes |
 | `<project>/.direnv/cdi/mounts.json` | `gen` | `{"closure": ["/nix/store/…", …]}` |
 
 ## See also

@@ -121,11 +121,16 @@ nix-direnv-cdi install
   └─ registers that dir with podman (containers.conf.d drop-in) and docker (daemon.json)
 ```
 
-Manual rollback, or `nix-direnv-cdi uninstall`, removes the same owned setup
-artifacts in reverse: delete only `~/.config/cdi/nix-direnv.json`, delete the
-owned podman drop-in, and remove only the shared CDI dir from Docker's
-`cdi-spec-dirs`. Preserve unrelated Docker keys and other CDI dirs. Restart
-Docker after any `daemon.json` change.
+`nix-direnv-cdi uninstall` removes the same owned setup artifacts in reverse:
+the generic CDI spec, the owned podman drop-in, and this tool's shared CDI dir
+from Docker's `cdi-spec-dirs`. Manual rollback should make the same conservative
+edits: delete only `nix-direnv-cdi.conf` from podman's `containers.conf.d`, keep
+other podman config, remove only this tool's CDI dir from Docker, preserve
+unrelated Docker settings and other CDI dirs, and remove the `cdi-spec-dirs` key
+instead of leaving an empty array if it would otherwise be empty. Restart Docker
+after any `/etc/docker/daemon.json` change. See
+[README.md](../README.md#uninstall-and-manual-rollback) for full rollback and
+backup recovery steps.
 
 ### Generate — per project, in `.envrc`
 
