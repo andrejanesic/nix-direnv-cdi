@@ -51,7 +51,7 @@ These are load-bearing; breaking them silently breaks the tool. Full detail in
   container. Everything in `hook`/`nsmount` is best-effort.
 - **`nsmount` must `unshare(CLONE_FS)` before `setns(CLONE_NEWNS)`** (Go threads
   share `CLONE_FS` → `EINVAL` otherwise), on a locked-and-discarded thread.
-  Mount-ns-only; no `CLONE_NEWUSER` (impossible in pure Go).
+  Mount-ns-only.
 - **The gate is `DIRENV_DIR`.** No `DIRENV_DIR` in the hook's env → no-op. This
   is the authorization model, not just a guard.
 - **`gen` must not depend on `DIRENV_DIFF`** (it uses the gcroot) so it can run
@@ -64,8 +64,7 @@ These are load-bearing; breaking them silently breaks the tool. Full detail in
 Logic changes to `hook`/`nsmount`/`cdispec` should be re-checked end-to-end
 against real container CLIs, not just unit tests — three real bugs in the
 dynamic hook were only caught by running a live container (`NDC_HOOK_LOG=<file>`
-enables hook tracing). Out of scope: bare rootless `runc` with an unprivileged
-invoker (a non-goal).
+enables hook tracing).
 
 ## Full documentation
 

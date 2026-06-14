@@ -107,8 +107,7 @@ shell decides which dev-shell, at run time.
 - **Surgical, not the whole store.** Only this project's closure is mounted,
   read-only (best-effort under rootless; nix store paths are immutable anyway).
   Dev-shell env (incl. secrets) is read live and **never written to disk**.
-- **Runtimes.** Verified end-to-end on **podman** and **docker**. One non-goal:
-  bare rootless `runc` with an unprivileged invoker. See
+- **Runtimes.** Verified end-to-end on **podman** and **docker**. See
   [docs/limitations.md](docs/limitations.md).
 - **Docker daemon env.** Docker runs containers through a daemon, so pass
   `DIRENV_DIR` and `DIRENV_DIFF` through (`--env DIRENV_DIR --env DIRENV_DIFF`,

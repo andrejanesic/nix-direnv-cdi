@@ -15,15 +15,6 @@ with other threads. `nsmount` therefore calls `unix.Unshare(unix.CLONE_FS)`
 (returns without unlocking → the tainted thread dies), keeping every other
 thread in the host namespace. Without the `unshare`, the mount silently fails.
 
-## No `CLONE_NEWUSER` from Go → bare rootless runc is out of scope
-
-`setns(CLONE_NEWUSER)` requires a **single-threaded** process. The Go runtime is
-always multithreaded, so the userns-entry fallback (needed only for *bare
-rootless runc with an unprivileged invoker*) cannot be done in pure Go — it would
-need an `nsexec`-style C constructor that runs before the Go runtime starts.
-That configuration is a [non-goal](limitations.md#non-goals); the hook no-ops there.
-Every real podman/docker config needs only mount-ns entry.
-
 ## Host-side mounts don't propagate; you must enter the container's mount ns
 
 A bind mount the hook performs in the **host** mount namespace does not appear

@@ -123,6 +123,18 @@ func TestE2EFlakeDevShell(t *testing.T) {
 		}
 	})
 
+	t.Run("gate_closed_without_direnv", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), cmdTimeout)
+		defer cancel()
+		args := []string{"-u", "DIRENV_DIR", "-u", "DIRENV_DIFF", cli.path, "run", "--rm"}
+		args = append(args, device...)
+		args = append(args, busyboxImage, "hello")
+		out, _ := run(ctx, nil, "env", args...)
+		if strings.Contains(out, "Hello, world!") {
+			t.Errorf("device must be inert without DIRENV_DIR, but hello ran:\n%s", out)
+		}
+	})
+
 	t.Run("control_no_device", func(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), cmdTimeout)
 		defer cancel()

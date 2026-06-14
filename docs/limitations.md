@@ -8,16 +8,12 @@ edges, see [internals.md](internals.md).)
 
 | Configuration | Status |
 |---|---|
-| **rootless podman** (crun) | ✅ verified end-to-end |
-| **rootful podman / root** | ✅ supported — *easier* (proper read-only mounts). Use `sudo -E` so the gate env survives |
-| **rootless docker** (RootlessKit) | ✅ supported — structurally identical to rootless podman |
-| **rootful docker** | ✅ verified end-to-end |
-| **bare rootless `runc`, unprivileged invoker** | ⛔ out of scope (non-goal) — hook no-ops gracefully |
+| **podman** | ✅ verified end-to-end |
+| **docker** | ✅ verified end-to-end |
 
 The shipped hook does **mount-namespace-only** entry, which is sufficient
 wherever the hook holds `CAP_SYS_ADMIN` in the userns owning the container's
-mount ns — i.e. every real podman/docker configuration. See
-[internals.md](internals.md) for why bare rootless runc is the lone exception.
+mount ns — i.e. podman and docker configurations.
 
 > **Docker** must have CDI enabled — on by default since Docker 28.3 (opt-in via
 > the `cdi` feature in 25.0–28.1). Podman supports CDI out of the box.
@@ -68,9 +64,5 @@ dev-shell isn't there):
   only the project's surgical closure.
 - **podman `precreate` / custom runtime shims.** podman-only or heavier; we stay
   on standard, cross-runtime CDI hooks.
-- **Bare rootless `runc` with an unprivileged invoker.** Would require a C
-  `nsexec` constructor for the user-namespace entry that pure Go can't perform
-  (see [internals.md](internals.md)). The hook degrades gracefully there. Not a
-  target, since it isn't how podman or docker run.
 - **Non-host-accessible prefixes.** The mechanism assumes the dev-shell prefix is
   host-accessible bind-mountable paths (true for nix store closures).

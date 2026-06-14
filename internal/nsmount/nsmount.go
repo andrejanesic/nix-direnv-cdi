@@ -5,13 +5,8 @@
 //
 // Only the mount namespace (CLONE_NEWNS) is entered. That is permitted from a
 // multithreaded Go process and suffices whenever the hook already holds
-// CAP_SYS_ADMIN in the user namespace owning that mount ns — the case for
-// rootless podman/crun (verified), rootful docker, and rootless docker
-// (RootlessKit). The CLONE_NEWUSER fallback needed for an unprivileged invoker
-// under bare rootless runc cannot be done in pure Go (setns(CLONE_NEWUSER)
-// requires a single-threaded process, which the Go runtime never is); that is
-// deferred. On EPERM, BindAll returns a descriptive error and the caller (the
-// hook) degrades gracefully.
+// CAP_SYS_ADMIN in the user namespace owning that mount ns. On EPERM, BindAll
+// returns a descriptive error and the caller (the hook) degrades gracefully.
 package nsmount
 
 import (
@@ -65,8 +60,7 @@ func bindAllOnThread(pid int, rootfs string, closure []string) error {
 	defer unix.Close(fd)
 	if err := unix.Setns(fd, unix.CLONE_NEWNS); err != nil {
 		// EPERM here means the hook lacks CAP_SYS_ADMIN in the container's user
-		// namespace (e.g. bare rootless runc with an unprivileged invoker); the
-		// CLONE_NEWUSER fallback is not available in pure Go.
+		// namespace. The hook treats this as best-effort and continues.
 		return fmt.Errorf("setns mnt (pid %d): %w", pid, err)
 	}
 	var firstErr error
