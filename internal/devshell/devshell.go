@@ -89,6 +89,60 @@ func discover(
 	return ds, nil
 }
 
+// ProjectRoot resolves the project root from the live environment: DIRENV_DIR
+// (leading '-' stripped) or $PWD. Used by `gen`, which runs inside `.envrc`
+// (where DIRENV_DIR is unset) and so falls back to the working directory.
+func ProjectRoot() (string, error) {
+	return projectRoot(os.LookupEnv, os.Getwd)
+}
+
+// Closure returns the dev-shell's runtime closure: every store path from
+// `nix-store -qR` over the gcroot resolved under <projectRoot>/.direnv. It does
+// NOT require DIRENV_DIFF, so it is safe to call during `.envrc` evaluation
+// (PLAN §1, §3 "gen"). This is the list the runtime hook bind-mounts.
+func Closure(projectRoot string) ([]string, error) {
+	gcroot, err := resolveGCRoot(projectRoot, os.LookupEnv)
+	if err != nil {
+		return nil, err
+	}
+	return listClosureNixStore(gcroot)
+}
+
+// MountsFile is the per-project data `gen` writes and the hook reads: the
+// closure path list to bind-mount. (PLAN §2, §3.)
+type MountsFile struct {
+	Closure []string `json:"closure"`
+}
+
+// WriteMounts writes the closure to path as JSON (0644), creating its parent
+// directory (0755) so the hook can read it at run time.
+func WriteMounts(path string, closure []string) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return fmt.Errorf("create mounts dir: %w", err)
+	}
+	data, err := json.MarshalIndent(MountsFile{Closure: closure}, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal mounts: %w", err)
+	}
+	if err := os.WriteFile(path, append(data, '\n'), 0o644); err != nil {
+		return fmt.Errorf("write mounts %s: %w", path, err)
+	}
+	return nil
+}
+
+// ReadMounts loads the closure path list previously written by WriteMounts.
+func ReadMounts(path string) ([]string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var mf MountsFile
+	if err := json.Unmarshal(data, &mf); err != nil {
+		return nil, fmt.Errorf("parse %s: %w", path, err)
+	}
+	return mf.Closure, nil
+}
+
 // projectRoot derives the project root from DIRENV_DIR with a single leading
 // '-' stripped (direnv's bookkeeping marker), falling back to the working dir.
 func projectRoot(getenv getenvFunc, getwd func() (string, error)) (string, error) {

@@ -1,7 +1,7 @@
 // Command nix-direnv-cdi makes a project's nix-direnv dev-shell available
-// inside any OCI container (podman, docker, docker compose) by generating a CDI
-// device: read-only closure mounts + dev-shell env + a createRuntime hook that
-// makes PATH additive. See PLAN.md for the full design.
+// inside any OCI container (podman, docker) via one generic CDI device whose
+// createRuntime hook injects the dev-shell dynamically at run time. See PLAN.md
+// for the full design.
 package main
 
 import (
@@ -12,7 +12,6 @@ import (
 
 	"github.com/andrejanesic/nix-direnv-cdi/internal/cdispec"
 	"github.com/andrejanesic/nix-direnv-cdi/internal/devshell"
-	"github.com/andrejanesic/nix-direnv-cdi/internal/fingerprint"
 	"github.com/andrejanesic/nix-direnv-cdi/internal/hook"
 	"github.com/andrejanesic/nix-direnv-cdi/internal/install"
 )
@@ -26,9 +25,9 @@ Usage:
   nix-direnv-cdi <command> [flags]
 
 Commands:
-  gen        Discover the dev-shell and write a validated CDI spec
-  hook       createRuntime hook: wrap the entrypoint for additive PATH (best-effort)
-  install    Register the shared CDI spec dir with podman/docker (idempotent)
+  gen        Write the project's closure to .direnv/cdi/mounts.json; print $DIRENV_CDI
+  hook       createRuntime hook: inject the dev-shell into the container (best-effort)
+  install    Register the generic CDI device with podman/docker (one-time)
   version    Print version information
 
 Run "nix-direnv-cdi <command> -h" for command-specific flags.`
@@ -66,104 +65,42 @@ func exitOnErr(err error) {
 	}
 }
 
-// cmdGen discovers the dev-shell, builds and validates the CDI spec, writes it,
-// and prints the device reference. (PLAN §3 "gen", milestones 2 & 5.)
-//
-// Placement differs by --mode (see resolvePlacement):
-//   - shared: ~/.config/cdi, device name = fingerprint(projectRoot); registered.
-//   - local:  $PWD/.direnv/cdi, constant device name "shell"; gitignored,
-//     unregistered, podman-only.
-//
-// stdout is identical in shape for both modes (line 1 = bare device ref, line 2
-// = the eval-able export) so `--device "$DIRENV_CDI"` works uniformly. local
-// mode adds an extra stderr hint with the --cdi-spec-dir to pass.
+// cmdGen computes the project's dev-shell closure and writes it to
+// <project>/.direnv/cdi/mounts.json (the data the runtime hook bind-mounts),
+// then prints the constant device reference + the eval-able export. It needs
+// only the gcroot (not DIRENV_DIFF), so it is safe to run inside `.envrc` right
+// after `use flake`. (PLAN §3 "gen".)
 func cmdGen(args []string) error {
 	fs := flag.NewFlagSet("gen", flag.ContinueOnError)
-	mode := fs.String("mode", "shared", "spec placement: shared|local")
-	out := fs.String("out", "", "output directory (default: per-mode)")
+	out := fs.String("out", "", "output dir for mounts.json (default: <project>/.direnv/cdi)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 
-	ds, err := devshell.Discover()
+	root, err := devshell.ProjectRoot()
+	if err != nil {
+		return err
+	}
+	closure, err := devshell.Closure(root)
 	if err != nil {
 		return err
 	}
 
-	dir, deviceName, err := resolvePlacement(*mode, *out, ds.ProjectRoot, sharedSpecDir)
-	if err != nil {
+	dir := *out
+	if dir == "" {
+		dir = filepath.Join(root, ".direnv", "cdi")
+	}
+	path := filepath.Join(dir, "mounts.json")
+	if err := devshell.WriteMounts(path, closure); err != nil {
 		return err
 	}
 
-	self, err := os.Executable()
-	if err != nil {
-		return err
-	}
-
-	spec, err := cdispec.Build(ds, deviceName, self)
-	if err != nil {
-		return err
-	}
-	if err := cdispec.Validate(spec); err != nil {
-		return err
-	}
-	if err := cdispec.Write(spec, dir, deviceName); err != nil {
-		return err
-	}
-
-	ref := cdispec.Kind + "=" + deviceName
-	specPath := filepath.Join(dir, "nix-direnv-"+deviceName+".json")
 	// Human-readable status to stderr so stdout stays eval-clean.
-	fmt.Fprintf(os.Stderr, "wrote CDI spec for %s -> %s\n", ds.ProjectRoot, specPath)
-	if *mode == "local" {
-		// local is unregistered and podman-only, so the user must pass the spec
-		// dir explicitly. Emit the absolute path as a copy-pasteable hint.
-		absDir, aerr := filepath.Abs(dir)
-		if aerr != nil {
-			absDir = dir
-		}
-		fmt.Fprintf(os.Stderr,
-			"local mode (podman-only): attach with  podman run --cdi-spec-dir %s --device \"$DIRENV_CDI\" <image> <cmd>\n",
-			absDir)
-	}
-	// stdout: the device reference and the eval-able export line.
-	fmt.Println(ref)
-	fmt.Printf("export DIRENV_CDI=%s\n", ref)
+	fmt.Fprintf(os.Stderr, "wrote %d closure paths for %s -> %s\n", len(closure), root, path)
+	// stdout: the constant device reference and the eval-able export line.
+	fmt.Println(cdispec.Ref)
+	fmt.Printf("export DIRENV_CDI=%s\n", cdispec.Ref)
 	return nil
-}
-
-// resolvePlacement maps (mode, out, projectRoot) to the spec output directory
-// and CDI device name, without any I/O beyond the injected sharedDir resolver.
-// It is the single source of truth for the shared-vs-local placement decision
-// (PLAN §2) and is unit-tested directly.
-//
-//   - shared: dir = sharedDir() (or out if non-empty); name = fingerprint.
-//   - local:  dir = <projectRoot>/.direnv/cdi (or out if non-empty); name = "shell".
-//   - other:  error.
-//
-// An explicit --out always overrides the per-mode default directory; the device
-// name is never affected by --out.
-func resolvePlacement(mode, out, projectRoot string, sharedDir func() (string, error)) (dir, deviceName string, err error) {
-	switch mode {
-	case "shared":
-		deviceName = fingerprint.Compute(projectRoot)
-		if out != "" {
-			return out, deviceName, nil
-		}
-		dir, err = sharedDir()
-		if err != nil {
-			return "", "", err
-		}
-		return dir, deviceName, nil
-	case "local":
-		deviceName = cdispec.Class // the constant device name "shell"
-		if out != "" {
-			return out, deviceName, nil
-		}
-		return filepath.Join(projectRoot, ".direnv", "cdi"), deviceName, nil
-	default:
-		return "", "", fmt.Errorf("unknown --mode %q (want shared|local)", mode)
-	}
 }
 
 // sharedSpecDir resolves the shared CDI spec directory: $XDG_CONFIG_HOME/cdi,
@@ -193,19 +130,36 @@ func cmdHook(args []string) {
 	}
 }
 
-// cmdInstall registers the shared CDI spec dir (the same dir gen --mode shared
-// writes to) with podman and docker so shared-mode devices resolve without a
-// per-run --cdi-spec-dir. (PLAN §3 "install", milestone 7.) Best-effort:
-// per-runtime failures fall back to printed manual instructions.
+// cmdInstall writes the single generic CDI device to the shared CDI dir (its
+// hook path = this installed binary) and registers that dir with podman and
+// docker so `--device nix-direnv.cdi/shell=devshell` resolves. (PLAN §2, §3
+// "install".) Run once per machine. Best-effort registration: per-runtime
+// failures fall back to printed manual instructions.
 func cmdInstall(args []string) error {
 	fs := flag.NewFlagSet("install", flag.ContinueOnError)
 	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	self, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	spec, err := cdispec.Build(self)
+	if err != nil {
 		return err
 	}
 	sharedDir, err := sharedSpecDir()
 	if err != nil {
 		return err
 	}
+	// Write validates the spec and makes the dir traversable.
+	if err := cdispec.Write(spec, sharedDir); err != nil {
+		return err
+	}
+	fmt.Fprintf(os.Stderr, "wrote generic CDI device (%s) -> %s\n",
+		cdispec.Ref, filepath.Join(sharedDir, cdispec.FileName))
+
 	paths, err := install.DefaultPaths(sharedDir)
 	if err != nil {
 		return err
