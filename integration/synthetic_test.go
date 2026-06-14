@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/andrejanesic/nix-direnv-cdi/internal/cdispec"
 	"github.com/andrejanesic/nix-direnv-cdi/internal/devshell"
 )
 
@@ -49,7 +50,7 @@ func TestTierB_SyntheticDynamicMount(t *testing.T) {
 	)
 	devshellEnv := []string{"DIRENV_DIR=-" + work, "DIRENV_DIFF=" + diff}
 
-	device := []string{"--cdi-spec-dir", specDir, "--device", "nix-direnv.cdi/shell=devshell"}
+	device := []string{"--cdi-spec-dir", specDir, "--device", cdispec.Ref}
 
 	t.Run("tool_runs_with_additive_path_and_env", func(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), cmdTimeout)

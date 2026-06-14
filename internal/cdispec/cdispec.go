@@ -19,10 +19,10 @@ import (
 // Spec identity. There is exactly one device, named Device, for all
 // projects; Ref is the constant reference users pass to --device.
 const (
-	Vendor = "nix-direnv.cdi"
-	Class  = "shell"
+	Vendor = "nix-direnv-cdi.org"
+	Class  = "env"
 	Kind   = Vendor + "/" + Class
-	Device = "devshell"
+	Device = "current"
 	Ref    = Kind + "=" + Device
 
 	// FileName is the spec file written into the registered CDI dir.

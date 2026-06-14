@@ -6,7 +6,7 @@ only a `createRuntime` hook. At container-creation time that hook injects the
 project's dev-shell *dynamically*, reading what it needs from the loaded direnv
 environment it inherits.
 
-The result: a **single** registered device (`nix-direnv.cdi/shell=devshell`)
+The result: a **single** registered device (`nix-direnv-cdi.org/env=current`)
 serves every project on the machine. No per-project specs, no fingerprints,
 nothing baked.
 

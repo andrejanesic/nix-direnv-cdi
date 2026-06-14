@@ -7,7 +7,7 @@ design exploration is preserved in the git history.
 
 ## D1 — One generic device, not one per project
 
-**Decision:** a single device `nix-direnv.cdi/shell=devshell` for all projects.
+**Decision:** a single device `nix-direnv-cdi.org/env=current` for all projects.
 
 The original design baked each project's closure + env into its own CDI spec,
 named by a fingerprint of the project root. That meant **N projects → N
@@ -76,6 +76,6 @@ possible.
 ## Consequence
 
 D1–D6 compose into: **one generic device + a hook that reads the live dev-shell
-and a pre-computed closure**. The device says "a dev-shell"; the launching shell
-says "which one", at run time. See [mechanisms.md](mechanisms.md) for how that
-plays out end to end.
+and a pre-computed closure**. The device says "current environment"; the
+launching shell says which project, at run time. See
+[mechanisms.md](mechanisms.md) for how that plays out end to end.

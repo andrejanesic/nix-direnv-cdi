@@ -82,8 +82,8 @@ func TestBuild_RejectsEmptyBinary(t *testing.T) {
 }
 
 func TestRef_IsConstant(t *testing.T) {
-	if Ref != "nix-direnv.cdi/shell=devshell" {
-		t.Errorf("Ref = %q, want nix-direnv.cdi/shell=devshell", Ref)
+	if Ref != "nix-direnv-cdi.org/env=current" {
+		t.Errorf("Ref = %q, want nix-direnv-cdi.org/env=current", Ref)
 	}
 }
 

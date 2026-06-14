@@ -16,6 +16,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/andrejanesic/nix-direnv-cdi/internal/cdispec"
 )
 
 const (
@@ -69,9 +71,10 @@ func writeGenericSpec(t *testing.T, dir, binPath string) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	spec := fmt.Sprintf(`{"cdiVersion":"0.6.0","kind":"nix-direnv.cdi/shell","devices":[`+
-		`{"name":"devshell","containerEdits":{"hooks":[`+
-		`{"hookName":"createRuntime","path":%q,"args":["nix-direnv-cdi","hook"]}]}}]}`+"\n", binPath)
+	spec := fmt.Sprintf(`{"cdiVersion":"0.6.0","kind":%q,"devices":[`+
+		`{"name":%q,"containerEdits":{"hooks":[`+
+		`{"hookName":"createRuntime","path":%q,"args":["nix-direnv-cdi","hook"]}]}}]}`+"\n",
+		cdispec.Kind, cdispec.Device, binPath)
 	if err := os.WriteFile(filepath.Join(dir, "nix-direnv.json"), []byte(spec), 0o644); err != nil {
 		t.Fatal(err)
 	}

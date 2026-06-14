@@ -8,7 +8,7 @@ that dev-shell **into any OCI container** — no Dockerfile, no `apt-get`, no
 rebuilding images — by attaching a single CDI device:
 
 ```sh
-podman run --device nix-direnv.cdi/shell=devshell <any-image> <your-tool>
+podman run --device nix-direnv-cdi.org/env=current <any-image> <your-tool>
 ```
 
 One generic device serves every project. The right dev-shell is chosen
@@ -21,7 +21,7 @@ automatically, at run time, from the direnv environment you're already in.
 **The proof — a tool that exists only in your dev-shell, running in a stock image:**
 
 ```console
-$ podman run --device nix-direnv.cdi/shell=devshell busybox hello
+$ podman run --device nix-direnv-cdi.org/env=current busybox hello
 Hello, world!          # ← `hello` came from your dev-shell, not from busybox
 ```
 
@@ -29,7 +29,7 @@ Hello, world!          # ← `hello` came from your dev-shell, not from busybox
 dev-shell; `alpine` doesn't ship it:
 
 ```sh
-podman run --device nix-direnv.cdi/shell=devshell -v "$PWD:$PWD" -w "$PWD" alpine \
+podman run --device nix-direnv-cdi.org/env=current -v "$PWD:$PWD" -w "$PWD" alpine \
   go test ./...
 ```
 
@@ -48,7 +48,7 @@ services:
         reservations:
           devices:
             - driver: cdi
-              device_ids: ["nix-direnv.cdi/shell=devshell"]
+              device_ids: ["nix-direnv-cdi.org/env=current"]
 ```
 
 ---
@@ -72,12 +72,12 @@ nix-direnv-cdi gen               # writes .direnv/cdi/mounts.json
 (or copy [`contrib/use_cdi.sh`](contrib/use_cdi.sh) into `~/.config/direnv/direnvrc`
 and just write `use flake` then `use cdi`.)
 
-The device reference is always the constant `nix-direnv.cdi/shell=devshell`.
+The device reference is always the constant `nix-direnv-cdi.org/env=current`.
 
 **3. Run anything with your dev-shell attached:**
 
 ```sh
-podman run --device nix-direnv.cdi/shell=devshell <image> <cmd>
+podman run --device nix-direnv-cdi.org/env=current <image> <cmd>
 ```
 
 ---
@@ -115,3 +115,8 @@ shell decides which dev-shell, at run time.
 - **[docs/](docs/readme.md)** — architecture, mechanisms (incl. data flow),
   design decisions, security, limitations, internals.
 - **[AGENTS.md](AGENTS.md)** — orientation for AI agents working in this repo.
+
+## Disclaimer
+
+nix-direnv-cdi is an independent project and is not affiliated with or endorsed
+by the NixOS Foundation, the Nix project, or the direnv project.

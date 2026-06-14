@@ -1,5 +1,5 @@
 // Package install registers the shared CDI spec directory with podman and
-// docker so the device reference (`--device nix-direnv.cdi/shell=devshell`)
+// docker so the device reference (`--device nix-direnv-cdi.org/env=current`)
 // resolves without a per-run `--cdi-spec-dir` flag.
 //
 // Strategy per runtime:

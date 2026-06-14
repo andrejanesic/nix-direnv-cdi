@@ -10,7 +10,7 @@ relies on are in [internals.md](internals.md).
 ## 1. The CDI device and the createRuntime hook
 
 A **CDI** (Container Device Interface) spec is a static JSON file describing a
-"device". When you `podman run --device nix-direnv.cdi/shell=devshell …`, the
+"device". When you `podman run --device nix-direnv-cdi.org/env=current …`, the
 runtime frontend injects that device's `containerEdits` into the OCI
 `config.json`. Our device's only edit is a single hook:
 
@@ -121,7 +121,7 @@ nix-direnv-cdi install
 use flake                       # nix-direnv materialises .direnv/flake-profile-* (the gcroot)
 nix-direnv-cdi gen
   ├─ gcroot ──nix-store -qR──▶ closure  ──▶ .direnv/cdi/mounts.json   {"closure":[…]}
-  └─ device ref to attach (constant): nix-direnv.cdi/shell=devshell
+  └─ device ref to attach (constant): nix-direnv-cdi.org/env=current
 ```
 
 `gen` needs only the **gcroot**, not `DIRENV_DIFF` — which is why it can run
@@ -132,7 +132,7 @@ integration possible.
 ### Inject — per `podman run`
 
 ```
-$ podman run --device nix-direnv.cdi/shell=devshell busybox hello      # from the loaded dev-shell
+$ podman run --device nix-direnv-cdi.org/env=current busybox hello      # from the loaded dev-shell
 
 TIME A  podman frontend
   loads ~/.config/cdi/nix-direnv.json → injects the createRuntime hook into config.json
@@ -162,7 +162,7 @@ TIME C  the (wrapped) entrypoint execs
 | Data | Source | Read at | By |
 |------|--------|---------|----|
 | closure (`/nix/store` paths) | gcroot → `nix-store -qR` | gen-time | `gen` → `mounts.json` |
-| which device | constant `nix-direnv.cdi/shell=devshell` | — | the `--device` arg |
+| which device | constant `nix-direnv-cdi.org/env=current` | — | the `--device` arg |
 | project root / gate | `DIRENV_DIR` (inherited) | run-time | hook |
 | `PATH` prefix + dev-shell env | `DIRENV_DIFF` (inherited) | run-time | hook |
 | container pid / rootfs | OCI State (stdin) / `config.json` | run-time | hook |
@@ -174,8 +174,9 @@ fresh, and never written to disk (see [security.md](security.md)).
 ## Why one device serves every project
 
 Because the closure comes from the gcroot and `PATH`/env come from the live
-`DIRENV_DIFF`, the only thing the *device* identifies is "a dev-shell" — not
-*which* one. The launching shell decides which project, at run time, via the
-inherited environment. That is why **one** generic device serves every project.
+`DIRENV_DIFF`, the only thing the *device* identifies is "the current
+environment" — not *which* project, closure, or secret. The launching shell
+decides which project, at run time, via the inherited environment. That is why
+**one** generic device serves every project.
 For the reasoning behind each of these choices, see
 [design-decisions.md](design-decisions.md).

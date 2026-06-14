@@ -133,7 +133,7 @@ func cmdHook(args []string) {
 
 // cmdInstall writes the single generic CDI device to the shared CDI dir (its
 // hook path = this installed binary) and registers that dir with podman and
-// docker so `--device nix-direnv.cdi/shell=devshell` resolves. Run once per
+// docker so `--device nix-direnv-cdi.org/env=current` resolves. Run once per
 // machine. Best-effort registration: per-runtime failures fall back to printed
 // manual instructions.
 func cmdInstall(args []string) error {
