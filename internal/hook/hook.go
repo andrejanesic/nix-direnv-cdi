@@ -50,6 +50,11 @@ func Run(in io.Reader) error {
 		return err
 	}
 	rootfs := resolveRootfs(spec, state.Bundle)
+	// Diagnostic: log as early as possible via both env channels (ambient +
+	// container config.json). If this line appears but run()'s do not, the fault
+	// is between here and the gate; if it never appears, NDC_HOOK_LOG reached the
+	// hook through neither channel.
+	debugLog(getenvWithProcessEnv(os.LookupEnv, spec))("Run: pid=%d bundle=%s rootfs=%q", state.Pid, state.Bundle, rootfs)
 	if rootfs == "" {
 		return nil
 	}

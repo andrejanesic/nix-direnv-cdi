@@ -108,6 +108,7 @@ func TestE2EFlakeDevShell(t *testing.T) {
 		args := []string{"exec", fixture, "env", "-u", "XDG_DATA_HOME", cli.path}
 		args = append(args, cli.runArgs()...)
 		args = append(args, cli.direnvPassthroughArgs()...)
+		args = append(args, "--env", "NDC_HOOK_LOG") // diagnostic: container-env channel for the hook log
 		args = append(args, busyboxImage, "sh", "-c", "hello; echo \"PATH=$PATH\"")
 		out, err := run(ctx, direnvEnv, "direnv", args...)
 		if err != nil {
@@ -128,6 +129,7 @@ func TestE2EFlakeDevShell(t *testing.T) {
 		args := []string{"exec", fixture, "env", "-u", "XDG_DATA_HOME", cli.path}
 		args = append(args, cli.runArgs()...)
 		args = append(args, cli.direnvPassthroughArgs()...)
+		args = append(args, "--env", "NDC_HOOK_LOG") // diagnostic: container-env channel for the hook log
 		args = append(args, busyboxImage, "sh", "-c", "ls /bin/busybox >/dev/null && echo BASE_OK")
 		out, err := run(ctx, direnvEnv, "direnv", args...)
 		if err != nil {

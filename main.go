@@ -92,6 +92,24 @@ func formatVersion() string {
 	return out
 }
 
+// hookBreadcrumb appends msg to the file named by NDC_HOOK_LOG (read from this
+// process's own environment — the ambient channel), or no-ops when unset. This
+// is a diagnostic for the createRuntime hook, whose stderr crun discards; it
+// reveals whether the hook binary ran our code and whether ambient env reached
+// it. Best-effort and silent on any error.
+func hookBreadcrumb(msg string) {
+	p := os.Getenv("NDC_HOOK_LOG")
+	if p == "" {
+		return
+	}
+	f, err := os.OpenFile(p, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	fmt.Fprintf(f, "nix-direnv-cdi main: %s\n", msg)
+}
+
 func exitOnErr(err error) {
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "nix-direnv-cdi:", err)
@@ -158,8 +176,10 @@ func sharedSpecDir() (string, error) {
 // otherwise exit 2), so an unexpected fault in mount injection or the
 // entrypoint wrap must degrade gracefully rather than abort the run.
 func cmdHook(args []string) {
+	hookBreadcrumb("cmdHook: entry") // diagnostic: proves the binary ran our code
 	defer func() {
 		if r := recover(); r != nil {
+			hookBreadcrumb(fmt.Sprintf("cmdHook: PANIC %v", r))
 			fmt.Fprintln(os.Stderr, "nix-direnv-cdi hook (panic, ignored):", r)
 		}
 	}()
