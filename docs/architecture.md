@@ -81,4 +81,4 @@ contrib/use_cdi.sh      # optional direnvrc `use cdi` helper
 
 - [mechanisms.md](mechanisms.md) — how the hook injects mounts and PATH, plus
   the end-to-end timeline.
-- [design-decisions.md](design-decisions.md) — why it's shaped this way.
+- [decisions.md](decisions.md) — why it's shaped this way.

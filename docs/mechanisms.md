@@ -198,4 +198,4 @@ environment" — not *which* project, closure, or secret. The launching shell
 decides which project, at run time, via the inherited environment. That is why
 **one** generic device serves every project.
 For the reasoning behind each of these choices, see
-[design-decisions.md](design-decisions.md).
+[decisions.md](decisions.md).
