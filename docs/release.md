@@ -192,10 +192,13 @@ behavior changes.
 
 ## Release checklist
 
+General maintainer review policy, risky-area checklists, and runtime-debugging
+workflow live in [CONTRIBUTING.md](../CONTRIBUTING.md).
+
 Before tagging:
 
-- Confirm `README.md`, `docs/`, `AGENTS.md`, and CLI usage agree on the command
-  set and supported distribution channels.
+- Confirm `README.md`, `CONTRIBUTING.md`, `docs/`, `AGENTS.md`, and CLI usage
+  agree on the command set and supported distribution channels.
 - Update `CHANGELOG.md`.
 - Run `go build ./...`.
 - Run `go vet ./...`.
@@ -217,4 +220,3 @@ Tag and publish:
 - Confirm binaries, checksums, cosign signatures, bundles, and attestations are
   present.
 - Verify at least one uploaded binary from the release page before announcing.
-

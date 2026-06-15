@@ -12,6 +12,7 @@ top-level [README](../README.md).
 | [design-decisions.md](design-decisions.md) | everyone | Why it's shaped this way, with the alternatives considered and rejected. |
 | [security.md](security.md) | users | The authorization model (the gate), exposure surface, read-only mounts, and secrets handling. |
 | [limitations.md](limitations.md) | users | Limitations, non-goals, the runtime support matrix, and troubleshooting. |
+| [../CONTRIBUTING.md](../CONTRIBUTING.md) | contributors + maintainers | Build/test commands, validation policy, review checklists, hook debugging, and maintainer responsibilities. |
 | [release.md](release.md) | users + maintainers | Release channels, artifact verification, upgrade, rollback, and the release checklist. |
 | [internals.md](internals.md) | maintainers | The non-obvious, load-bearing kernel/Go traps the implementation depends on. |
 
@@ -22,5 +23,7 @@ top-level [README](../README.md).
 3. **[design-decisions.md](design-decisions.md)** — why, and what was rejected.
 4. **[security.md](security.md)** + **[limitations.md](limitations.md)** — the
    model and its edges (user-facing).
-5. **[internals.md](internals.md)** — read before changing the hook or `nsmount`
-   (maintainer-facing).
+5. **[../CONTRIBUTING.md](../CONTRIBUTING.md)** — read before changing code;
+   it has the validation policy and review checklists.
+6. **[internals.md](internals.md)** — read before changing the hook or
+   `nsmount`.

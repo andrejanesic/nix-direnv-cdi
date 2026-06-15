@@ -1,6 +1,13 @@
-# Contributing
+# Contributing and Maintaining
 
 Thanks for taking the time to contribute to nix-direnv-cdi.
+
+This file is the human operating guide for changes to the project: how to
+verify them, what invariants reviewers must preserve, how to debug hook
+failures, and what maintainers must check before changing support claims or
+cutting releases. For lower-level mechanism details, start with
+[docs/internals.md](docs/internals.md) and
+[docs/mechanisms.md](docs/mechanisms.md).
 
 ## License
 
@@ -53,12 +60,15 @@ go build -buildvcs=false ./...
 | unit | `go test ./... -skip '^(TestSynthetic|TestE2E)'` | Go |
 | synthetic | `go test ./integration -run '^TestSynthetic'` | selected container CLI + `busybox` image |
 | e2e | `go test ./integration -run '^TestE2E'` | selected container CLI + `busybox` image + nix + direnv |
+| installer lifecycle | `go test ./... -run 'Install|Uninstall|Registration'` | Go, and podman for registration tests |
+| package | `nix build .#nix-direnv-cdi` | nix |
 
 Select the container CLI with `NDC_CONTAINER_CLI`:
 
 ```sh
 NDC_CONTAINER_CLI=docker go test ./integration -run '^TestSynthetic'
 NDC_CONTAINER_CLI=docker go test ./integration -run '^TestE2E'
+NDC_CONTAINER_CLI=podman go test ./integration -run '^TestSynthetic'
 NDC_CONTAINER_CLI=podman go test ./integration -run '^TestE2E'
 ```
 
@@ -88,16 +98,169 @@ go test ./... -skip '^TestE2E'
 go test ./... -skip '^(TestSynthetic|TestE2E)'
 ```
 
+## Validation Policy
+
+Use the narrowest check that covers the risk, but do not rely only on unit tests
+for runtime behavior:
+
+- Pure unit-level changes: run unit tests.
+- `internal/hook`, `internal/nsmount`, or `internal/cdispec` changes: run unit
+  tests plus real container validation for the affected runtime. For shared
+  behavior, validate both docker and podman.
+- `internal/devshell` changes: run unit tests. If the change affects generated
+  closures, `DIRENV_DIFF`, `PATH`, or exported env behavior, also run e2e.
+- `internal/install` changes: run installer lifecycle tests and any affected
+  runtime smoke/registration tests.
+- Documentation-only changes: run no code tests unless the docs change support
+  claims, command behavior, release policy, or runtime coverage.
+- Runtime support-claim changes for docker or podman require fresh e2e evidence
+  from that runtime before merging.
+- Release preparation must follow [docs/release.md](docs/release.md), including
+  package checks and version-output verification.
+
+Missing integration prerequisites are failures by design. Use `-skip` only when
+intentionally omitting a suite, and say what was skipped in the review or
+release notes.
+
+## Project Invariants
+
+These are load-bearing. Preserve them unless the design is intentionally being
+changed and the docs/tests move with it.
+
+- The hook must always exit 0; a non-zero `createRuntime` hook aborts the
+  container.
+- `DIRENV_DIR` is the authorization gate. Without it, the device is inert.
+- `gen` must not depend on `DIRENV_DIFF`; it derives the closure from the
+  gcroot so it can run during `.envrc` evaluation.
+- The hook reads `DIRENV_DIFF` at container run time and resolves direnv context
+  from the hook environment first, then OCI `process.env` for daemon-driven
+  CLIs such as Docker.
+- Mount injection is best-effort. Mount failures must be logged/debuggable but
+  must not abort the container or prevent entrypoint wrapping.
+- `nsmount` must call `unshare(CLONE_FS)` before `setns(CLONE_NEWNS)`, on a
+  locked OS thread that is discarded after namespace entry.
+- Closure paths can be files or directories; bind targets must match the source
+  type.
+- Read-only remount is best-effort under rootless user namespaces.
+- The CDI spec must stay generic: no project path, closure, or environment data
+  belongs in the device.
+- The CDI spec dir, hook binary, and `.direnv/cdi/mounts.json` path chain must
+  stay traversable for rootless runtimes.
+- Entrypoint wrapping must preserve the T1-T10 behavior matrix in
+  [docs/mechanisms.md](docs/mechanisms.md), including the T9 limitation for
+  absolute paths into read-only store mounts.
+
+## Review Checklist
+
+For `internal/hook` changes, check:
+
+- no `DIRENV_DIR` still means no mounts, no wrapping, and no container failure
+- hook errors cannot make the hook process fail the container
+- mount failures are visible through `NDC_HOOK_LOG` and ignored by normal flow
+- hook-env and OCI `process.env` fallback behavior still works
+- `DIRENV_DIFF` decode errors and missing diffs are handled deliberately
+- additive `PATH`, dev-shell env export, and image-tool preservation still match
+  the T1-T10 matrix
+
+For `internal/nsmount` changes, check:
+
+- `CLONE_FS` is unshared before entering the mount namespace
+- namespace entry remains confined to a locked, discarded OS thread
+- file and directory closure paths both bind correctly
+- rootless `EPERM` on read-only remount remains non-fatal
+- the caller still receives useful errors for debugging while the hook degrades
+  gracefully
+
+For `internal/devshell` changes, check:
+
+- closure generation still uses the gcroot and remains usable from `.envrc`
+- padded and unpadded `DIRENV_DIFF` encodings still decode
+- additive `PATH` prefix derivation excludes previous PATH entries
+- exported env excludes `PATH` and `DIRENV_*`
+- `.direnv/cdi/mounts.json` remains minimal project data: only the closure
+
+For `internal/cdispec` changes, check:
+
+- the CDI spec validates through the CDI library
+- the device remains `nix-direnv-cdi.org/env=current`
+- the only per-device edit remains the generic `createRuntime` hook
+- the hook path points at the installed binary and remains traversable
+
+For `internal/install` changes, check:
+
+- install owns only the shared CDI spec, the podman drop-in, and the Docker
+  system CDI spec
+- divergent existing files are backed up before rewrite
+- matching existing files are idempotent no-ops
+- uninstall removes only owned files and is idempotent
+- Docker behavior uses the daemon-scanned system CDI spec path and does not
+  silently rewrite unrelated daemon configuration
+
+For docs changes, check:
+
+- command examples match the CLI and tests
+- podman/docker support claims match recent runtime validation
+- limitations and security claims match the implementation
+- release or binary-distribution claims also reflect open items in
+  [docs/todo.md](docs/todo.md)
+
 ## Hook Debugging
 
 `createRuntime` hook output is normally hidden by the container runtime. Set
 `NDC_HOOK_LOG=<file>` in the launching environment to append a hook trace with
 the gate decision, mounts, and `DIRENV_DIFF` decoding.
 
+Typical podman probe:
+
+```sh
+NDC_HOOK_LOG=/tmp/ndc-hook.log \
+  podman run --rm --device nix-direnv-cdi.org/env=current busybox sh -c 'echo "$PATH"'
+cat /tmp/ndc-hook.log
+```
+
+For Docker, pass the direnv context through the daemon boundary:
+
+```sh
+NDC_HOOK_LOG=/tmp/ndc-hook.log \
+  docker run --rm --device nix-direnv-cdi.org/env=current \
+  --env DIRENV_DIR --env DIRENV_DIFF --env NDC_HOOK_LOG \
+  busybox sh -c 'echo "$PATH"'
+cat /tmp/ndc-hook.log
+```
+
+Read the log as a triage flow:
+
+- `gate closed`: `DIRENV_DIR` was not visible. Check that the command was run
+  from a loaded direnv shell, or for Docker that `--env DIRENV_DIR` was passed.
+- `gate open`: the device is authorized for the current project.
+- `mounts.json` read errors or zero paths: run `nix-direnv-cdi gen`, check the
+  project path from `DIRENV_DIR`, and check rootless traversability of the
+  `.direnv/cdi/mounts.json` path chain.
+- `mount FAILED`: inspect namespace permission/runtime issues. Rootless setups
+  must still allow the hook to enter the container mount namespace.
+- `mount OK`: the closure was injected.
+- `runtimeEnv ... has=false`: `DIRENV_DIFF` was missing. For Docker, pass
+  `--env DIRENV_DIFF`; for podman, confirm the launch shell has direnv loaded.
+- `runtimeEnv ... err=...`: the hook saw `DIRENV_DIFF` but could not decode it.
+- A dev-shell tool runs but `PATH` is not additive when the entrypoint is an
+  absolute `/nix/store/...` path: this is the documented T9 limitation.
+
+Prefer synthetic integration when isolating hook and runtime behavior without
+nix/direnv. Move to e2e when the failure depends on real gcroots, `direnv`, or
+the committed flake fixture.
+
 ## Releases
 
 Release policy, artifact verification, upgrade/rollback instructions, and the
-maintainer checklist live in [docs/release.md](docs/release.md). Tagged releases
+release checklist live in [docs/release.md](docs/release.md). Tagged releases
 use SemVer tags such as `v0.1.0`, publish Nix install paths plus standalone
 Linux binaries, and include checksums, cosign keyless signatures, and GitHub
 artifact provenance.
+
+Before publishing binaries, also check [docs/todo.md](docs/todo.md) for
+release-blocking legal/security follow-up such as third-party notices and
+`SECURITY.md`.
+
+Do not change runtime support claims without fresh docker and/or podman e2e
+evidence, and call out runtime support or installer behavior changes in
+`CHANGELOG.md` and release notes.
