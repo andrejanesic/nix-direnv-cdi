@@ -187,6 +187,9 @@ func cmdHook(args []string) {
 		}
 	}()
 	fs := flag.NewFlagSet("hook", flag.ContinueOnError)
+	// Diagnostic: accept (and ignore) the trace-path flag the test embeds in the
+	// CDI hook args; trace.Mark reads it straight from os.Args.
+	_ = fs.String("ndctrace", "", "diagnostic trace base path")
 	if err := fs.Parse(args); err != nil {
 		fmt.Fprintln(os.Stderr, "nix-direnv-cdi hook:", err)
 		return

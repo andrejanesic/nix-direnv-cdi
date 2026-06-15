@@ -139,10 +139,13 @@ func writeGenericSpec(t *testing.T, dir, binPath string) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
+	// Pass the diagnostic trace base via argv (--ndctrace=<binPath>) so the hook
+	// can record breadcrumbs without relying on /proc or env reaching it; the
+	// test reads them back via dumpTrace globbing <binPath>.*.ndctrace.
 	spec := fmt.Sprintf(`{"cdiVersion":"0.6.0","kind":%q,"devices":[`+
 		`{"name":%q,"containerEdits":{"hooks":[`+
-		`{"hookName":"createRuntime","path":%q,"args":["nix-direnv-cdi","hook"]}]}}]}`+"\n",
-		cdispec.Kind, cdispec.Device, binPath)
+		`{"hookName":"createRuntime","path":%q,"args":["nix-direnv-cdi","hook",%q]}]}}]}`+"\n",
+		cdispec.Kind, cdispec.Device, binPath, "--ndctrace="+binPath)
 	if err := os.WriteFile(filepath.Join(dir, "nix-direnv.json"), []byte(spec), 0o644); err != nil {
 		t.Fatal(err)
 	}
