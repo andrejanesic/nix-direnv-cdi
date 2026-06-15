@@ -1,43 +1,60 @@
 # nix-direnv-cdi
 
-**Your project's nix dev-shell — inside supported containers, with one flag.**
+[![ci](https://github.com/andrejanesic/nix-direnv-cdi/actions/workflows/ci.yaml/badge.svg)](https://github.com/andrejanesic/nix-direnv-cdi/actions/workflows/ci.yaml) [![codeql](https://github.com/andrejanesic/nix-direnv-cdi/actions/workflows/codeql.yaml/badge.svg)](https://github.com/andrejanesic/nix-direnv-cdi/actions/workflows/codeql.yaml) [![release](https://img.shields.io/github/v/release/andrejanesic/nix-direnv-cdi?sort=semver)](https://github.com/andrejanesic/nix-direnv-cdi/releases) [![license](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
-You already have a perfect, reproducible toolchain in your `flake.nix`: the right
-Go, Node, compilers, linters, CLIs, pinned to the bit. nix-direnv-cdi teleports
-that dev-shell **into containers run by CDI-capable OCI runtimes** — no
-Dockerfile, no `apt-get`, no rebuilding images — by attaching a single CDI
-device:
+**Sandbox a coding agent in a throwaway container with your real, pinned project
+toolchain — no per-repo agent image to build or maintain.**
 
 ```sh
-podman run --device nix-direnv-cdi.org/env=current <any-image> <your-tool>
+# docker
+docker run \
+  --env DIRENV_DIR \
+  --env DIRENV_DIFF \
+  --device nix-direnv-cdi.org/env=current -v "$PWD:$PWD" -w "$PWD" \
+  ubuntu claude
+
+# podman
+podman run \
+  --device nix-direnv-cdi.org/env=current -v "$PWD:$PWD" \
+  -w "$PWD" \
+  ubuntu codex
 ```
 
-One generic device serves every project. The right dev-shell is chosen
-automatically, at run time, from the direnv environment you're already in.
+The agent gets your full `flake.nix` dev-shell — identical to yours, nothing
+baked into the image — yet stays boxed in. Only this project's `/nix/store`
+closure is shared, read-only and surgical (never the whole store), so the agent
+runs your real tools without mutating them or reaching the rest of your machine.
+The dev-shell env (including secrets) is read live and **never written to disk**,
+and the device is **inert** unless launched from the loaded dev-shell. One
+generic device serves every project; the right dev-shell is chosen automatically
+at run time from the direnv environment you're already in.
 
----
+## Use it
 
-## See it in action
-
-**The proof — a tool that exists only in your dev-shell, running in a stock image:**
+A tool that exists only in your dev-shell, running inside a stock image:
 
 ```console
-$ podman run --device nix-direnv-cdi.org/env=current busybox hello
+$ podman run --rm --device nix-direnv-cdi.org/env=current busybox hello
 Hello, world!          # ← `hello` came from your dev-shell, not from busybox
 ```
 
-**Run your real toolchain in a minimal image** — `go` here comes from the
-dev-shell; `alpine` doesn't ship it:
+Run your real toolchain against your sources in a minimal image — `go` here comes
+from the dev-shell; `alpine` doesn't ship it:
 
 ```sh
 podman run --device nix-direnv-cdi.org/env=current -v "$PWD:$PWD" -w "$PWD" alpine \
   go test ./...
 ```
 
-**Reproducible CI / "works on my machine", gone** — the container runs the exact
-same tools as your laptop, with no custom image to build or maintain.
+**Docker** runs containers through a daemon, so pass direnv's bookkeeping
+variables through to the OCI process:
 
-**docker compose** — give a service your dev-shell:
+```sh
+docker run --env DIRENV_DIR --env DIRENV_DIFF \
+  --device nix-direnv-cdi.org/env=current <image> <cmd>
+```
+
+Or with Compose:
 
 ```yaml
 services:
@@ -55,9 +72,9 @@ services:
               device_ids: ["nix-direnv-cdi.org/env=current"]
 ```
 
----
+The device reference is always the constant `nix-direnv-cdi.org/env=current`.
 
-## Quick start
+## Install
 
 Prerequisites:
 
@@ -69,34 +86,15 @@ Prerequisites:
 
 ```sh
 nix run github:andrejanesic/nix-direnv-cdi -- install
-# or: nix profile install github:andrejanesic/nix-direnv-cdi && nix-direnv-cdi install
-```
-
-For a released version, pin the tag:
-
-```sh
+# or pin a release:
 nix profile install github:andrejanesic/nix-direnv-cdi/v0.1.0
 nix-direnv-cdi install
-nix-direnv-cdi version
 ```
 
-For Docker, `install` uses the daemon-scanned system CDI spec path
-`/etc/cdi/nix-direnv.json`. Docker is system-wide, so the installer does not add
-your per-user `~/.config/cdi` directory to `/etc/docker/daemon.json`.
-If that write needs privileges, the command prints the exact manual fallback:
-install the generated spec from `~/.config/cdi/nix-direnv.json` (or the matching
-`$XDG_CONFIG_HOME/cdi` path) to `/etc/cdi/nix-direnv.json`, for example with
-`sudo install -D -m 0644`. Per-runtime registration errors print manual fallback
-commands instead of making the whole install fail.
-
-Minimal post-install smoke test:
-
-```sh
-podman run --rm --device nix-direnv-cdi.org/env=current busybox true
-```
-
-Expected result: no output and exit status 0. This proves the generic device
-resolves and the inert hook does not break a plain container.
+For Docker, `install` writes the daemon-scanned system CDI spec at
+`/etc/cdi/nix-direnv.json`. If that write needs privileges, the command prints
+the exact manual fallback (install the generated spec from
+`~/.config/cdi/nix-direnv.json` with `sudo install -D -m 0644`).
 
 **2. In your project's `.envrc`:**
 
@@ -105,38 +103,36 @@ use flake
 nix-direnv-cdi gen               # writes .direnv/cdi/mounts.json
 ```
 
-(or copy [`contrib/use_cdi.sh`](contrib/use_cdi.sh) into `~/.config/direnv/direnvrc`
-and just write `use flake` then `use cdi`.)
+(or copy [`contrib/use_cdi.sh`](contrib/use_cdi.sh) into
+`~/.config/direnv/direnvrc` and just write `use flake` then `use cdi`.)
 
-The device reference is always the constant `nix-direnv-cdi.org/env=current`.
-
-**3. Run anything with your dev-shell attached:**
+**3. Smoke test** from inside a loaded dev-shell:
 
 ```sh
-podman run --device nix-direnv-cdi.org/env=current <image> <cmd>
+podman run --rm --device nix-direnv-cdi.org/env=current busybox true
 ```
 
-For Docker, pass direnv's bookkeeping variables through to the OCI process env:
+Exit status 0 with no output proves the device resolves and the inert hook does
+not break a plain container. Then swap `true` for a command that exists in your
+dev-shell but not the image (the integration fixture ships GNU `hello`).
 
-```sh
-docker run --env DIRENV_DIR --env DIRENV_DIFF \
-  --device nix-direnv-cdi.org/env=current <image> <cmd>
-```
+## More use-cases
 
-End-to-end smoke test from inside a loaded dev-shell:
+- **Debug a distroless / scratch image.** Your prod container ships no shell,
+  `curl`, `gdb`, or `strace`. Attach the device and your dev-shell's debug
+  toolkit appears read-only — inspect the *real* image, no debug variant to build.
+- **Reproducible CI / "works on my machine".** CI and your laptop run the exact
+  same nix-pinned tools — one generic runner image, per-project toolchains, no
+  custom CI image to maintain.
+- **Coding agents in containers.** Run an agent in a disposable container that has
+  your real, pinned project toolchain — no per-repo agent image, and the agent's
+  environment is provably identical to yours. (Mount sources writable with
+  `-v "$PWD:$PWD"`, and scrub secrets from the dev-shell env you don't want it to
+  see.)
+- **Cross-distro / cross-libc testing.** Hold your test tooling fixed and sweep
+  the base image (glibc vs musl, old vs new distro) under it.
 
-```console
-$ podman run --rm --device nix-direnv-cdi.org/env=current busybox hello
-Hello, world!
-```
-
-Use a command that exists in your dev-shell but not in the image. The `hello`
-example assumes your dev-shell includes GNU hello, as the integration fixture
-does.
-
----
-
-## How it works (in one breath)
+## How it works
 
 `install` registers **one** generic CDI device whose only content is a
 `createRuntime` hook. `gen` records your dev-shell's `/nix/store` **closure** to
@@ -147,101 +143,37 @@ the entrypoint** so the dev-shell's `bin` dirs are prepended to `PATH` and its
 env vars are set. Nothing per-project is baked into the device; the launching
 shell decides which dev-shell, at run time.
 
-→ Full design, mechanisms, and data flow: **[docs/](docs/readme.md)**.
-
-## Good to know
-
-- **Being in the dev-shell is the authorization.** The device only does anything
-  when launched from a shell that has the project's dev-shell loaded (you ran
-  `direnv allow`). Anywhere else it's **inert** — it mounts nothing. See
+- **Being in the dev-shell is the authorization.** The device acts only when
+  launched from a shell with the project's dev-shell loaded (you ran `direnv
+  allow`). Anywhere else it is **inert** — it mounts nothing. See
   [docs/security.md](docs/security.md).
 - **Surgical, not the whole store.** Only this project's closure is mounted,
   read-only (best-effort under rootless; nix store paths are immutable anyway).
-  Dev-shell env (incl. secrets) is read live and **never written to disk**. When
-  Docker passthrough is used, the wrapper unsets `DIRENV_DIR` and `DIRENV_DIFF`
-  before execing the real entrypoint.
-- **Runtimes.** Verified end-to-end on **podman** and **docker**. See
-  [docs/limitations.md](docs/limitations.md). Release validation runs the same
-  e2e suite with `NDC_CONTAINER_CLI=docker` and `NDC_CONTAINER_CLI=podman`.
-- **Docker daemon env.** Docker runs containers through a daemon, so pass
-  `DIRENV_DIR` and `DIRENV_DIFF` through (`--env DIRENV_DIR --env DIRENV_DIFF`,
-  or the Compose `environment` keys above) when using Docker directly.
+  Dev-shell env (incl. secrets) is read live and **never written to disk**.
+- **Sources aren't mounted.** Add `-v "$PWD:$PWD"` yourself when you need them.
+- **Docker passthrough.** Pass `DIRENV_DIR` and `DIRENV_DIFF` through (`--env`,
+  or the Compose `environment` keys); the wrapper unsets them before execing the
+  real entrypoint.
+- **`sudo` strips the gate.** Use `sudo -E` or
+  `--preserve-env=DIRENV_DIR,DIRENV_DIFF`, or the device goes inert.
+- **Runtimes.** Verified end-to-end on **podman** and **docker**.
 - **Limitation (T9).** An absolute path *into* the read-only store runs but isn't
   made additive — run dev-shell tools by name.
 
-## If nothing happens
+If a container runs but the dev-shell is missing, check `echo "$DIRENV_DIR"` is
+non-empty, re-run `gen`, and confirm the `--device` flag. Full troubleshooting
+and design: **[docs/](docs/readme.md)**.
 
-If the container runs but the dev-shell is missing:
-
-- Confirm you launched from the loaded dev-shell: `echo "$DIRENV_DIR"` should be
-  non-empty.
-- Re-run `nix-direnv-cdi gen` or reload direnv so `.direnv/cdi/mounts.json` is
-  current.
-- Confirm you passed `--device nix-direnv-cdi.org/env=current`.
-- For Docker, add `--env DIRENV_DIR --env DIRENV_DIFF`.
-- For `sudo`, preserve env with `sudo -E` or
-  `sudo --preserve-env=DIRENV_DIR,DIRENV_DIFF`.
-- For hook tracing, set `NDC_HOOK_LOG=/tmp/ndc-hook.log` before the container
-  command.
-
-Full troubleshooting: [docs/limitations.md](docs/limitations.md).
-
-## Uninstall and manual rollback
-
-`nix-direnv-cdi install` owns only machine-level registration for the generic
-device:
-
-- the shared CDI spec directory: `$XDG_CONFIG_HOME/cdi`, or `~/.config/cdi`
-  when `XDG_CONFIG_HOME` is unset
-- the shared CDI spec file: `$XDG_CONFIG_HOME/cdi/nix-direnv.json`, or
-  `~/.config/cdi/nix-direnv.json` when `XDG_CONFIG_HOME` is unset
-- the podman drop-in:
-  `$XDG_CONFIG_HOME/containers/containers.conf.d/nix-direnv-cdi.conf`, or
-  `~/.config/containers/containers.conf.d/nix-direnv-cdi.conf`
-- the Docker system CDI spec: `/etc/cdi/nix-direnv.json`
-
-Run this to remove those owned entries. It removes the spec file, podman
-drop-in, and Docker system CDI spec; it leaves the shared directory itself in
-place.
+## Uninstall
 
 ```sh
 nix-direnv-cdi uninstall
 ```
 
-Manual rollback is the same set of conservative edits:
-
-1. Delete only the generic CDI spec file:
-   `rm ~/.config/cdi/nix-direnv.json` (or the matching `$XDG_CONFIG_HOME/cdi`
-   path).
-2. For podman, delete only this owned drop-in:
-   `~/.config/containers/containers.conf.d/nix-direnv-cdi.conf` (or the matching
-   `$XDG_CONFIG_HOME/containers/...` path). Leave other podman config and other
-   drop-ins in place.
-3. For Docker, remove only this tool-owned system CDI spec:
-   `sudo rm /etc/cdi/nix-direnv.json`. Do not remove other CDI specs in
-   `/etc/cdi`.
-
-Backup behavior is limited and predictable:
-
-- `install` creates a same-directory `<path>.bak` only before rewriting an
-  existing file with different content, for example
-  `/etc/cdi/nix-direnv.json.bak` or
-  `~/.config/containers/containers.conf.d/nix-direnv-cdi.conf.bak`.
-- If the existing file already matches what `install` would write, it is a
-  no-op and no backup is created or overwritten.
-- If a `.bak` already exists and a real rewrite is needed, the backup path is
-  overwritten with the pre-rewrite content.
-- `uninstall` does not create backups. It removes only the owned files listed
-  above and reports no-op when they are already absent.
-
-Docker `daemon.json` is only relevant for an advanced manual custom CDI
-directory setup; changing that file may require a Docker restart.
-
-Package rollback is separate from unregistering the CDI device. For Nix
-profiles, use Nix profile generations or reinstall a pinned release, then rerun
-`nix-direnv-cdi install` so the CDI spec points at the active binary. See
-[docs/release.md](docs/release.md) for release install, verification, upgrade,
-and rollback commands.
+Removes only the machine-level registration this tool owns (the generic CDI spec
+file, the podman drop-in, and the Docker system CDI spec); it leaves the shared
+CDI directory in place and creates no backups. Package rollback is separate —
+see [docs/release.md](docs/release.md).
 
 ## Documentation
 
