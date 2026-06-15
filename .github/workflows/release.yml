@@ -35,6 +35,9 @@ jobs:
           go vet ./...
           go test ./... -skip '^(TestSynthetic|TestE2E)'
 
+      - name: Install Syft
+        uses: anchore/sbom-action/download-syft@v0
+
       - name: Build binaries
         env:
           VERSION: ${{ github.ref_name }}
@@ -55,7 +58,13 @@ jobs:
               -o "${out}" .
           done
 
+          syft . \
+            --source-name nix-direnv-cdi \
+            --source-version "${VERSION}" \
+            -o "spdx-json=dist/nix-direnv-cdi_${VERSION}_sbom.spdx.json"
+
           (cd dist && sha256sum nix-direnv-cdi_* > SHA256SUMS)
+          cp LICENSE dist/
 
       - name: Sign artifacts
         env:
@@ -75,6 +84,14 @@ jobs:
             dist/nix-direnv-cdi_${{ github.ref_name }}_linux_amd64
             dist/nix-direnv-cdi_${{ github.ref_name }}_linux_arm64
             dist/SHA256SUMS
+
+      - name: Attest SBOM
+        uses: actions/attest-sbom@v2
+        with:
+          subject-path: |
+            dist/nix-direnv-cdi_${{ github.ref_name }}_linux_amd64
+            dist/nix-direnv-cdi_${{ github.ref_name }}_linux_arm64
+          sbom-path: dist/nix-direnv-cdi_${{ github.ref_name }}_sbom.spdx.json
 
       - name: Publish GitHub Release
         env:
