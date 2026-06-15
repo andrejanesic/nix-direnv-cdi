@@ -11,7 +11,7 @@ import (
 	"github.com/andrejanesic/nix-direnv-cdi/internal/cdispec"
 )
 
-func TestPodmanInstallRegistrationSmoke(t *testing.T) {
+func TestE2EPodmanInstallRegistrationSmoke(t *testing.T) {
 	podman, err := exec.LookPath("podman")
 	if err != nil {
 		t.Skip("podman not found")
