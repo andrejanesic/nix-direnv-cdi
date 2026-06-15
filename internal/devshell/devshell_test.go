@@ -5,6 +5,8 @@ import (
 	"compress/zlib"
 	"encoding/base64"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"reflect"
 	"sort"
 	"strings"
@@ -127,6 +129,73 @@ func TestDiscover_FakeEnvAndClosure(t *testing.T) {
 	}
 }
 
+func TestReadMounts_AcceptsStorePaths(t *testing.T) {
+	want := []string{"/nix/store/aaa-go", "/nix/store/bbb-coreutils/bin"}
+	path := filepath.Join(t.TempDir(), "mounts.json")
+	if err := WriteMounts(path, want); err != nil {
+		t.Fatalf("WriteMounts: %v", err)
+	}
+	got, err := ReadMounts(path, DefaultStoreDir)
+	if err != nil {
+		t.Fatalf("ReadMounts: %v", err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("ReadMounts = %v, want %v", got, want)
+	}
+}
+
+func TestReadMounts_RelocatedStoreDir(t *testing.T) {
+	// A relocated store (NIX_STORE_DIR) is honoured: paths under it are accepted,
+	// and the default /nix/store is then rejected.
+	want := []string{"/custom/store/aaa-go"}
+	path := filepath.Join(t.TempDir(), "mounts.json")
+	if err := WriteMounts(path, append([]string{"/nix/store/bbb"}, want...)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ReadMounts(path, "/custom/store"); err == nil {
+		t.Fatal("expected /nix/store entry to be rejected under relocated store")
+	}
+	if err := WriteMounts(path, want); err != nil {
+		t.Fatal(err)
+	}
+	got, err := ReadMounts(path, "/custom/store")
+	if err != nil {
+		t.Fatalf("ReadMounts (relocated): %v", err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("ReadMounts = %v, want %v", got, want)
+	}
+}
+
+func TestReadMounts_RejectsUnsafePaths(t *testing.T) {
+	// Each fixture has one tampered entry alongside a legitimate one; the whole
+	// file must be rejected (fail-closed) so nothing gets bind-mounted.
+	cases := map[string]string{
+		"traversal escaping the store": "/nix/store/../../etc",
+		"absolute non-store path":      "/etc/passwd",
+		"relative path":                "nix/store/aaa",
+		"dot-dot segment":              "/nix/store/aaa/../../../root/.ssh",
+		"the store root itself":        "/nix/store",
+		"trailing slash":               "/nix/store/aaa/",
+		"empty string":                 "",
+	}
+	for name, bad := range cases {
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "mounts.json")
+			data, err := json.Marshal(MountsFile{Closure: []string{"/nix/store/aaa-go", bad}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(path, data, 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := ReadMounts(path, DefaultStoreDir); err == nil {
+				t.Fatalf("ReadMounts accepted unsafe path %q; want error", bad)
+			}
+		})
+	}
+}
+
 func TestProjectRoot_FallbackToGetwd(t *testing.T) {
 	// DIRENV_DIR unset -> fall back to getwd.
 	root, err := projectRoot(fakeEnv(map[string]string{}), func() (string, error) {
@@ -185,6 +254,23 @@ func TestDecodeDirenvDiff_AcceptsPadding(t *testing.T) {
 	}
 	if !sawPadding {
 		t.Fatal("no fixture exercised base64 padding; test would be meaningless")
+	}
+}
+
+func TestDecodeDirenvDiff_RejectsBomb(t *testing.T) {
+	// A small compressed payload that inflates past the cap must be refused
+	// rather than read into memory unbounded.
+	var buf bytes.Buffer
+	zw := zlib.NewWriter(&buf)
+	if _, err := zw.Write(bytes.Repeat([]byte{'A'}, 32<<20)); err != nil { // 32 MiB of 'A'
+		t.Fatal(err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	enc := base64.RawURLEncoding.EncodeToString(buf.Bytes())
+	if _, _, err := decodeDirenvDiff(enc); err == nil {
+		t.Fatal("decodeDirenvDiff accepted a decompression bomb; want error")
 	}
 }
 

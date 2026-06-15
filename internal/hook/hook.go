@@ -19,6 +19,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"syscall"
 
 	oci "github.com/opencontainers/runtime-spec/specs-go"
 
@@ -84,8 +85,13 @@ func run(state *oci.State, spec *oci.Spec, rootfs string, getenv getenvFunc, mou
 	project := strings.TrimPrefix(dirRaw, "-") // direnv's leading '-' marker
 	dbg("gate open: project=%s pid=%d rootfs=%s", project, state.Pid, rootfs)
 
-	// 1. Inject the project's closure mounts (best-effort).
-	closure, rerr := devshell.ReadMounts(filepath.Join(project, ".direnv", "cdi", "mounts.json"))
+	// 1. Inject the project's closure mounts (best-effort). The allowlist root
+	// is /nix/store, overridable via NIX_STORE_DIR for a relocated store.
+	storeDir := devshell.DefaultStoreDir
+	if v, ok := runtimeGetenv("NIX_STORE_DIR"); ok && v != "" {
+		storeDir = v
+	}
+	closure, rerr := devshell.ReadMounts(filepath.Join(project, ".direnv", "cdi", "mounts.json"), storeDir)
 	dbg("mounts.json: %d paths, readErr=%v", len(closure), rerr)
 	if rerr == nil && len(closure) > 0 && state.Pid > 0 {
 		if merr := mount(state.Pid, rootfs, closure); merr != nil {
@@ -129,7 +135,11 @@ func debugLog(getenv getenvFunc) func(string, ...any) {
 		return func(string, ...any) {}
 	}
 	return func(format string, args ...any) {
-		f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+		// 0600 so the log (project paths, closure sizes, env-var names) isn't
+		// world-readable, and O_NOFOLLOW so a pre-planted symlink at the path
+		// can't redirect the write. NDC_HOOK_LOG is a debug-only knob; point it
+		// at a private path.
+		f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND|syscall.O_NOFOLLOW, 0o600)
 		if err != nil {
 			return
 		}
@@ -178,6 +188,12 @@ func wrapEntrypoint(spec *oci.Spec, rootfs string, prefix []string, env map[stri
 		fmt.Fprintf(&blk, "export PATH=\"%s:$PATH\"\n", strings.Join(prefix, ":"))
 	}
 	for _, k := range sortedKeys(env) {
+		if !validEnvName(k) {
+			// The name is emitted unquoted in `export <name>=...`; a name with
+			// shell metacharacters would inject into the shim. Skip it rather
+			// than risk executing it inside the container.
+			continue
+		}
 		fmt.Fprintf(&blk, "export %s=%s\n", k, shellQuote(env[k]))
 	}
 	exports := blk.String()
@@ -264,6 +280,26 @@ func wrapEntrypoint(spec *oci.Spec, rootfs string, prefix []string, env map[stri
 		real = real + ".real"
 	}
 	return wrapAt(shimPath, real)
+}
+
+// validEnvName reports whether k is a POSIX-shell-safe environment variable
+// name (^[A-Za-z_][A-Za-z0-9_]*$). The shim emits `export <name>=...` with the
+// name unquoted, so a name carrying shell metacharacters would otherwise inject
+// into the container's entrypoint; such names are skipped.
+func validEnvName(k string) bool {
+	if k == "" {
+		return false
+	}
+	for i, r := range k {
+		switch {
+		case r == '_':
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z':
+		case i > 0 && r >= '0' && r <= '9':
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // shellQuote single-quotes s for safe inclusion in a /bin/sh script, escaping

@@ -413,6 +413,30 @@ func TestRunDockerSpecPermissionFallbackDoesNotFailInstall(t *testing.T) {
 	}
 }
 
+// TestBackupFile_RefusesSymlink: a pre-planted symlink at "<path>.bak" must not
+// be followed, so a local attacker can't redirect the backup write at a file the
+// installing user (possibly root) can write.
+func TestBackupFile_RefusesSymlink(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "conf")
+	if err := os.WriteFile(target, []byte("real\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sentinel := filepath.Join(dir, "sentinel")
+	if err := os.WriteFile(sentinel, []byte("do-not-touch\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(sentinel, target+".bak"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := backupFile(target); err == nil {
+		t.Fatal("backupFile followed a symlink; want error")
+	}
+	if got, _ := os.ReadFile(sentinel); string(got) != "do-not-touch\n" {
+		t.Errorf("sentinel overwritten through symlink: %q", got)
+	}
+}
+
 func fakeDockerOnPath(t *testing.T) {
 	t.Helper()
 	dir := t.TempDir()

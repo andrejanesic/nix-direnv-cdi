@@ -29,6 +29,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 
 	"github.com/andrejanesic/nix-direnv-cdi/internal/cdispec"
 )
@@ -165,7 +166,7 @@ func installPodman(dropinPath, sharedDir string, w io.Writer) error {
 	if err := os.MkdirAll(filepath.Dir(dropinPath), 0o755); err != nil {
 		return err
 	}
-	if err := os.WriteFile(dropinPath, []byte(want), 0o644); err != nil {
+	if err := writeFileNoFollow(dropinPath, []byte(want), 0o644); err != nil {
 		return err
 	}
 	fmt.Fprintf(w, "podman: registered %s\n  (wrote %s)\n", sharedDir, dropinPath)
@@ -192,7 +193,7 @@ func installDockerSpec(specPath string, specData []byte, w io.Writer) error {
 	if err := os.MkdirAll(filepath.Dir(specPath), 0o755); err != nil {
 		return err
 	}
-	if err := os.WriteFile(specPath, specData, 0o644); err != nil {
+	if err := writeFileNoFollow(specPath, specData, 0o644); err != nil {
 		return err
 	}
 	fmt.Fprintf(w, "docker: installed system CDI spec\n  (wrote %s)\n", specPath)
@@ -240,10 +241,28 @@ func backupFile(path string) (string, error) {
 		mode = fi.Mode().Perm()
 	}
 	bak := path + ".bak"
-	if err := os.WriteFile(bak, data, mode); err != nil {
+	if err := writeFileNoFollow(bak, data, mode); err != nil {
 		return "", err
 	}
 	return bak, nil
+}
+
+// writeFileNoFollow writes data to path like os.WriteFile, but refuses to follow
+// a symlink at the final path component (O_NOFOLLOW). On a shared host this stops
+// a pre-planted symlink at the target (e.g. a "<path>.bak" or a system spec path
+// under /etc/cdi) from redirecting the write — which, when install runs under
+// sudo, would otherwise be an arbitrary-file overwrite. A regular file is still
+// overwritten, preserving idempotent re-installs.
+func writeFileNoFollow(path string, data []byte, perm os.FileMode) error {
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC|syscall.O_NOFOLLOW, perm)
+	if err != nil {
+		return err
+	}
+	if _, werr := f.Write(data); werr != nil {
+		f.Close()
+		return werr
+	}
+	return f.Close()
 }
 
 // dockerPresent reports whether docker is worth configuring: a docker binary on

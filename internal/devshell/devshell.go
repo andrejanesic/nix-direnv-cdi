@@ -129,8 +129,28 @@ func WriteMounts(path string, closure []string) error {
 	return nil
 }
 
-// ReadMounts loads the closure path list previously written by WriteMounts.
-func ReadMounts(path string) ([]string, error) {
+// DefaultStoreDir is the conventional Nix store location and the allowlist root
+// for closure paths when NIX_STORE_DIR is unset. `nix-store -qR` only ever
+// returns absolute paths under the store, so anything else in mounts.json is
+// tampering or corruption and must not be bind-mounted into the container.
+const DefaultStoreDir = "/nix/store"
+
+// validClosurePath reports whether p is safe to bind: an absolute path already
+// in canonical form (no ".", ".." or empty segments, no trailing slash) and
+// under storeDir. The canonical-form check is what stops traversal entries like
+// "<storeDir>/../../etc" from escaping the store (and, after join, the container
+// rootfs).
+func validClosurePath(p, storeDir string) bool {
+	prefix := strings.TrimSuffix(storeDir, "/") + "/"
+	return filepath.IsAbs(p) && filepath.Clean(p) == p && strings.HasPrefix(p, prefix)
+}
+
+// ReadMounts loads the closure path list previously written by WriteMounts. It
+// refuses the whole file (fail-closed) if any entry is not a clean absolute path
+// under storeDir, so a tampered mounts.json cannot make the hook bind-mount an
+// arbitrary host path into the container. storeDir is normally /nix/store
+// (DefaultStoreDir); pass the value of NIX_STORE_DIR for a relocated store.
+func ReadMounts(path, storeDir string) ([]string, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
@@ -138,6 +158,11 @@ func ReadMounts(path string) ([]string, error) {
 	var mf MountsFile
 	if err := json.Unmarshal(data, &mf); err != nil {
 		return nil, fmt.Errorf("parse %s: %w", path, err)
+	}
+	for _, p := range mf.Closure {
+		if !validClosurePath(p, storeDir) {
+			return nil, fmt.Errorf("refusing unsafe closure path in %s: %q (must be a clean absolute path under %s)", path, p, storeDir)
+		}
 	}
 	return mf.Closure, nil
 }
@@ -171,9 +196,17 @@ func decodeDirenvDiff(s string) (prev, next map[string]string, err error) {
 		return nil, nil, fmt.Errorf("zlib: %w", err)
 	}
 	defer zr.Close()
-	jsonBytes, err := io.ReadAll(zr)
+	// Cap the inflated size: DIRENV_DIFF can be attacker-influenced (it is read
+	// from the OCI process env for daemon-driven CLIs), so an unbounded read
+	// would let a zlib bomb exhaust memory. A real dev-shell diff is far under
+	// this ceiling.
+	const maxDiffBytes = 16 << 20 // 16 MiB
+	jsonBytes, err := io.ReadAll(io.LimitReader(zr, maxDiffBytes+1))
 	if err != nil {
 		return nil, nil, fmt.Errorf("inflate: %w", err)
+	}
+	if len(jsonBytes) > maxDiffBytes {
+		return nil, nil, fmt.Errorf("DIRENV_DIFF inflates beyond %d bytes; refusing", maxDiffBytes)
 	}
 	var diff struct {
 		Prev map[string]string `json:"p"`

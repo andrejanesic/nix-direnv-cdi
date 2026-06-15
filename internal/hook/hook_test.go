@@ -87,6 +87,87 @@ func TestWrap_RelativeEntry_ShimContent(t *testing.T) {
 	}
 }
 
+func TestDebugLog_PrivatePermsAndNoSymlink(t *testing.T) {
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "hook.log")
+	dbg := debugLog(func(k string) (string, bool) {
+		if k == "NDC_HOOK_LOG" {
+			return logPath, true
+		}
+		return "", false
+	})
+	dbg("hello %d", 1)
+	fi, err := os.Stat(logPath)
+	if err != nil {
+		t.Fatalf("log not written: %v", err)
+	}
+	if fi.Mode().Perm() != 0o600 {
+		t.Errorf("log mode = %v, want 0600", fi.Mode().Perm())
+	}
+
+	// A symlink at the log path must not be followed.
+	sentinel := filepath.Join(dir, "sentinel")
+	if err := os.WriteFile(sentinel, []byte("keep\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(dir, "link.log")
+	if err := os.Symlink(sentinel, link); err != nil {
+		t.Fatal(err)
+	}
+	debugLog(func(k string) (string, bool) {
+		if k == "NDC_HOOK_LOG" {
+			return link, true
+		}
+		return "", false
+	})("through symlink")
+	if got, _ := os.ReadFile(sentinel); string(got) != "keep\n" {
+		t.Errorf("debug log wrote through symlink: %q", got)
+	}
+}
+
+func TestValidEnvName(t *testing.T) {
+	for _, ok := range []string{"CC", "_x", "FOO_BAR", "A1", "_"} {
+		if !validEnvName(ok) {
+			t.Errorf("validEnvName(%q) = false, want true", ok)
+		}
+	}
+	for _, bad := range []string{"", "1ABC", "FOO BAR", "x=y", "a;b", "$(id)", "a`b`", "a-b", "a.b"} {
+		if validEnvName(bad) {
+			t.Errorf("validEnvName(%q) = true, want false", bad)
+		}
+	}
+}
+
+func TestWrap_SkipsUnsafeEnvName(t *testing.T) {
+	prefixDir := filepath.Join(t.TempDir(), "nixbin")
+	writeExec(t, filepath.Join(prefixDir, "tool"))
+	rootfs := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(rootfs, "usr/bin"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	spec := &oci.Spec{Process: &oci.Process{
+		Args: []string{"tool"},
+		Env:  []string{"PATH=/usr/bin"},
+	}}
+	// A legitimate var plus an injection attempt smuggled in as a NAME.
+	env := map[string]string{"CC": "gcc", "x=$(touch /tmp/pwned)": "v"}
+
+	if err := wrapEntrypoint(spec, rootfs, []string{prefixDir}, env); err != nil {
+		t.Fatalf("wrapEntrypoint: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(rootfs, "usr/bin/tool"))
+	if err != nil {
+		t.Fatalf("shim not written: %v", err)
+	}
+	s := string(data)
+	if !strings.Contains(s, "export CC='gcc'") {
+		t.Errorf("valid var dropped:\n%s", s)
+	}
+	if strings.Contains(s, "touch /tmp/pwned") || strings.Contains(s, "$(") {
+		t.Errorf("unsafe env name leaked into shim:\n%s", s)
+	}
+}
+
 func TestWrap_AbsoluteInRootfs_T10(t *testing.T) {
 	rootfs := t.TempDir()
 	app := filepath.Join(rootfs, "usr/local/bin/app")
