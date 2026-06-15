@@ -53,6 +53,7 @@
             doCheck = false;
             meta = {
               description = "Expose a nix-direnv dev-shell inside any OCI container via a CDI device";
+              homepage = "https://github.com/andrejanesic/nix-direnv-cdi";
               mainProgram = "nix-direnv-cdi";
               platforms = systems;
               license = pkgs.lib.licenses.asl20;
