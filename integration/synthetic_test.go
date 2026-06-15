@@ -8,6 +8,7 @@ package integration
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -27,6 +28,15 @@ func TestSyntheticDynamicMount(t *testing.T) {
 	writeExecScript(t, filepath.Join(prefixDir, "prefixtool"),
 		"#!/bin/sh\necho PREFIXTOOL-RAN\necho \"toolPATH=$PATH\"\necho \"marker=$MARKER\"\n")
 	chmodTraversable(t, prefixDir)
+
+	// A decoy store path: a sibling under the same store dir (work, the synthetic
+	// NIX_STORE_DIR) that is NOT part of this project's closure — it is absent
+	// from mounts.json. It stands in for every other package living in a real
+	// /nix/store. The hook must mount only the closure, so this path must stay
+	// invisible inside the container.
+	decoyDir := filepath.Join(work, "decoy")
+	writeExecScript(t, filepath.Join(decoyDir, "decoytool"), "#!/bin/sh\necho DECOYTOOL-RAN\n")
+	chmodTraversable(t, decoyDir)
 
 	// Per-project mounts.json: the "closure" is the prefix dir (source==dest).
 	mountsPath := filepath.Join(work, ".direnv", "cdi", "mounts.json")
@@ -90,6 +100,32 @@ func TestSyntheticDynamicMount(t *testing.T) {
 		}
 		if !strings.Contains(out, "BASE_OK") {
 			t.Errorf("base tools broke with device attached:\n%s", out)
+		}
+	})
+
+	t.Run("only_closure_paths_mounted", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), cmdTimeout)
+		defer cancel()
+		// Inside the container the closure prefix dir must be present (mounted),
+		// while the decoy store path must be absent: the hook binds only the
+		// mounts.json entries, never the whole store dir. A leaked decoy would
+		// mean the entire /nix/store was mounted.
+		script := fmt.Sprintf(
+			"if [ -e %s ]; then echo CLOSURE_PRESENT; else echo CLOSURE_ABSENT; fi; "+
+				"if [ -e %s ]; then echo DECOY_PRESENT; else echo DECOY_ABSENT; fi",
+			prefixDir, decoyDir)
+		args := append([]string{"run", "--rm"}, device...)
+		args = append(args, cli.direnvPassthroughArgs()...)
+		args = append(args, busyboxImage, "sh", "-c", script)
+		out, err := run(ctx, devshellEnv, cli.path, args...)
+		if err != nil {
+			t.Fatalf("%s run: %v\n%s", cli.name, err, out)
+		}
+		if !strings.Contains(out, "CLOSURE_PRESENT") {
+			t.Errorf("closure path not mounted into container:\n%s", out)
+		}
+		if strings.Contains(out, "DECOY_PRESENT") || !strings.Contains(out, "DECOY_ABSENT") {
+			t.Errorf("decoy store path leaked into container — whole store mounted instead of just the closure:\n%s", out)
 		}
 	})
 
