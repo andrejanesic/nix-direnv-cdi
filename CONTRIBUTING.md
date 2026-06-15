@@ -201,8 +201,6 @@ For docs changes, check:
 - command examples match the CLI and tests
 - podman/docker support claims match recent runtime validation
 - limitations and security claims match the implementation
-- release or binary-distribution claims also reflect open items in
-  [docs/todo.md](docs/todo.md)
 
 ## Hook Debugging
 
@@ -256,10 +254,6 @@ release checklist live in [docs/release.md](docs/release.md). Tagged releases
 use SemVer tags such as `v0.1.0`, publish Nix install paths plus standalone
 Linux binaries, and include checksums, cosign keyless signatures, and GitHub
 artifact provenance.
-
-Before publishing binaries, also check [docs/todo.md](docs/todo.md) for
-release-blocking legal/security follow-up such as third-party notices and
-`SECURITY.md`.
 
 Do not change runtime support claims without fresh docker and/or podman e2e
 evidence, and call out runtime support or installer behavior changes in
