@@ -32,5 +32,5 @@ and known issues explicitly.
 ### Changed
 
 - Supply chain hardened: all GitHub Actions pinned to commit SHAs, with
-  `govulncheck`, CodeQL, and Dependabot added to CI.
+  `govulncheck`, CodeQL, and Renovate added to CI.
 
