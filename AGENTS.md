@@ -26,6 +26,7 @@ run time.
 | `internal/ociconfig/` | read OCI State (stdin) + `config.json` |
 | `internal/install/` | register the device dir with podman/docker (backup-then-auto) |
 | `integration/` | synthetic and e2e integration tests plus the flake fixture |
+| `example/` | copy-pasteable user project (agent-in-container walkthrough) |
 | `contrib/use_cdi.sh` | optional `use cdi` direnvrc helper (runs `gen` inside `.envrc`) |
 | `flake.nix` | `nix run` / profile install; version-stamped static binary |
 | `docs/` | reference documentation (see `docs/readme.md`) |

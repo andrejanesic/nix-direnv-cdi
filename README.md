@@ -82,7 +82,44 @@ Prerequisites:
 - flakes enabled if your project uses `use flake`
 - podman, or Docker Engine with CDI support
 
-**1. Install once per machine** (writes + registers the one generic device):
+**1. Install once per machine** (writes + registers the one generic device).
+
+**On NixOS / home-manager, declare it** — this is the preferred path: the hook
+path is tied to the flake package, so every rebuild regenerates the spec for the
+installed version (the imperative installer writes it once and goes stale on
+upgrade). Add the flake input
+`inputs.nix-direnv-cdi.url = "github:andrejanesic/nix-direnv-cdi";`, then:
+
+```nix
+# NixOS — serves podman AND docker (/etc/cdi is a default scan dir for both)
+{ pkgs, inputs, ... }:
+let
+  ndc = inputs.nix-direnv-cdi.packages.${pkgs.system}.default;
+  ndcSpec = pkgs.writeText "nix-direnv-cdi.json" (builtins.toJSON {
+    cdiVersion = "0.3.0";
+    kind = "nix-direnv-cdi.org/env";
+    devices = [{
+      name = "current";
+      containerEdits.hooks = [{
+        hookName = "createRuntime";
+        path = "${ndc}/bin/nix-direnv-cdi";
+        args = [ "nix-direnv-cdi" "hook" ];
+      }];
+    }];
+    containerEdits = { };
+  });
+in {
+  environment.systemPackages = [ ndc ]; # puts the `gen` CLI on $PATH
+  environment.etc."cdi/nix-direnv.json".source = ndcSpec;
+  virtualisation.docker.daemon.settings.features.cdi = true; # docker only
+}
+```
+
+For home-manager (rootless podman) the spec goes to `~/.config/cdi` and needs a
+`containers.conf.d` drop-in to register it — see
+[docs/usage.md](docs/usage.md#home-manager-recommended).
+
+**Other Linux distros** — install the binary and run the imperative installer:
 
 ```sh
 nix run github:andrejanesic/nix-direnv-cdi -- install
@@ -94,7 +131,8 @@ nix-direnv-cdi install
 For Docker, `install` writes the daemon-scanned system CDI spec at
 `/etc/cdi/nix-direnv.json`. If that write needs privileges, the command prints
 the exact manual fallback (install the generated spec from
-`~/.config/cdi/nix-direnv.json` with `sudo install -D -m 0644`).
+`~/.config/cdi/nix-direnv.json` with `sudo install -D -m 0644`). Re-run
+`install` after every upgrade (the NixOS/home-manager paths above avoid this).
 
 **2. In your project's `.envrc`:**
 
@@ -177,6 +215,10 @@ see [docs/release.md](docs/release.md).
 
 ## Documentation
 
+- **[docs/usage.md](docs/usage.md)** — the user guide: install, project setup,
+  run, remove, and troubleshooting in one place.
+- **[example/](example/readme.md)** — a copy-pasteable project running a coding
+  agent in a container via the device.
 - **[docs/](docs/readme.md)** — architecture, mechanisms (incl. data flow),
   design decisions, security, limitations, internals.
 - **[docs/release.md](docs/release.md)** — release channels, artifact

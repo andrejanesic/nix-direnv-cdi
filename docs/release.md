@@ -72,6 +72,30 @@ derivation) used when building via the flake; for that provenance, inspect
 
 ## Install
 
+### NixOS and home-manager (preferred)
+
+On Nix-managed systems, **declare the device** rather than running the imperative
+installer. Add the flake as an input
+(`inputs.nix-direnv-cdi.url = "github:andrejanesic/nix-direnv-cdi";`) and place
+the generic CDI spec with the flake package's store path
+(`${ndc}/bin/nix-direnv-cdi`) as the hook path:
+
+- **NixOS** — `environment.systemPackages = [ ndc ];` and
+  `environment.etc."cdi/nix-direnv.json".source = ndcSpec;` (one file serves
+  podman and docker, since `/etc/cdi` is a default scan dir for both). For
+  docker, also set `virtualisation.docker.daemon.settings.features.cdi = true`.
+- **home-manager** (rootless podman) — `home.packages = [ ndc ];`,
+  `xdg.configFile."cdi/nix-direnv.json".source = ndcSpec;`, plus a
+  `containers.conf.d` drop-in registering `~/.config/cdi`.
+
+Full, copy-pasteable module snippets:
+[usage.md → Install](usage.md#nixos-recommended). This is preferred because the
+hook path is tied to the flake package, so every rebuild regenerates the spec for
+the installed version — unlike the imperative installer, which writes the spec
+once and goes stale on upgrade.
+
+### Imperative install (other Linux distros)
+
 Recommended Nix install:
 
 ```sh
