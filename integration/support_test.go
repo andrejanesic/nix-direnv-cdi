@@ -126,26 +126,36 @@ func writeGenericSpec(t *testing.T, dir, binPath string) {
 	chmodTraversable(t, dir)
 }
 
-func writeSpecForCLI(t *testing.T, cli containerCLI, binPath string) string {
+// writeSpecForCLI writes the generic CDI device where the selected CLI will find
+// it. Docker reads its spec dir from daemon config (cli.specDir). For podman we
+// write to a hermetic temp dir and point podman at it via containers.conf: the
+// global --cdi-spec-dir flag only exists since podman 5.1, whereas the
+// cdi_spec_dirs config field predates it (containers-common 0.58 / podman 4.9),
+// so this works across the podman versions CI may have. CONTAINERS_CONF_OVERRIDE
+// is merged on top of the system config, preserving rootless defaults.
+func writeSpecForCLI(t *testing.T, cli containerCLI, binPath string) {
 	t.Helper()
 	if cli.name == "docker" {
 		writeGenericSpec(t, cli.specDir, binPath)
-		return cli.specDir
+		return
 	}
-	specDir := filepath.Join(t.TempDir(), "cdi")
+	base := t.TempDir()
+	specDir := filepath.Join(base, "cdi")
 	writeGenericSpec(t, specDir, binPath)
-	return specDir
+
+	conf := filepath.Join(base, "containers.conf")
+	content := fmt.Sprintf("[engine]\ncdi_spec_dirs = [%q]\n", specDir)
+	if err := os.WriteFile(conf, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CONTAINERS_CONF_OVERRIDE", conf)
 }
 
-// runArgs returns the CLI-specific argument segment that follows the binary
-// path: global flags, the `run` subcommand, --rm, and the generic device.
-// podman's --cdi-spec-dir is a *global* flag, so it must precede `run`; placing
-// it after `run` yields "unknown flag: --cdi-spec-dir". Docker reads its spec
-// dir from daemon config, so it only needs --device.
-func (c containerCLI) runArgs(specDir string) []string {
-	if c.name == "podman" {
-		return []string{"--cdi-spec-dir", specDir, "run", "--rm", "--device", cdispec.Ref}
-	}
+// runArgs returns the argument segment that follows the binary path: the `run`
+// subcommand, --rm, and the generic device. Both docker and podman locate the
+// CDI spec dir out of band (daemon config / containers.conf via
+// writeSpecForCLI), so no per-run spec-dir flag is needed.
+func (c containerCLI) runArgs() []string {
 	return []string{"run", "--rm", "--device", cdispec.Ref}
 }
 

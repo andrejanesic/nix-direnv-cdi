@@ -58,12 +58,12 @@ func TestSyntheticDynamicMount(t *testing.T) {
 	// relocated stores use).
 	devshellEnv := []string{"DIRENV_DIR=-" + work, "DIRENV_DIFF=" + diff, "NIX_STORE_DIR=" + work}
 
-	specDir := writeSpecForCLI(t, cli, bin)
+	writeSpecForCLI(t, cli, bin)
 
 	t.Run("tool_runs_with_additive_path_and_env", func(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), cmdTimeout)
 		defer cancel()
-		args := append([]string{}, cli.runArgs(specDir)...)
+		args := append([]string{}, cli.runArgs()...)
 		args = append(args, cli.direnvPassthroughArgs()...)
 		args = append(args, busyboxImage, "prefixtool")
 		out, err := run(ctx, devshellEnv, cli.path, args...)
@@ -90,7 +90,7 @@ func TestSyntheticDynamicMount(t *testing.T) {
 	t.Run("base_tools_still_work", func(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), cmdTimeout)
 		defer cancel()
-		args := append([]string{}, cli.runArgs(specDir)...)
+		args := append([]string{}, cli.runArgs()...)
 		args = append(args, cli.direnvPassthroughArgs()...)
 		args = append(args, busyboxImage, "sh", "-c", "ls /bin/busybox >/dev/null && echo BASE_OK")
 		out, err := run(ctx, devshellEnv, cli.path, args...)
@@ -113,7 +113,7 @@ func TestSyntheticDynamicMount(t *testing.T) {
 			"if [ -e %s ]; then echo CLOSURE_PRESENT; else echo CLOSURE_ABSENT; fi; "+
 				"if [ -e %s ]; then echo DECOY_PRESENT; else echo DECOY_ABSENT; fi",
 			prefixDir, decoyDir)
-		args := append([]string{}, cli.runArgs(specDir)...)
+		args := append([]string{}, cli.runArgs()...)
 		args = append(args, cli.direnvPassthroughArgs()...)
 		args = append(args, busyboxImage, "sh", "-c", script)
 		out, err := run(ctx, devshellEnv, cli.path, args...)
@@ -132,7 +132,7 @@ func TestSyntheticDynamicMount(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), cmdTimeout)
 		defer cancel()
 		// Device attached but NO DIRENV_DIR -> hook is inert -> tool not found.
-		args := append([]string{}, cli.runArgs(specDir)...)
+		args := append([]string{}, cli.runArgs()...)
 		args = append(args, busyboxImage, "prefixtool")
 		out, _ := run(ctx, nil, cli.path, args...) // no devshellEnv
 		if strings.Contains(out, "PREFIXTOOL-RAN") {
