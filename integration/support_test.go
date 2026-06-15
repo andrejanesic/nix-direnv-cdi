@@ -43,24 +43,25 @@ func requireContainerCLI(t *testing.T) containerCLI {
 	if name == "" {
 		name = defaultContainerCLI
 	}
+
 	switch name {
 	case "podman", "docker":
 	default:
 		t.Fatalf("unsupported %s=%q (want podman or docker)", envContainerCLI, name)
 	}
+
 	p, err := exec.LookPath(name)
 	if err != nil {
 		t.Fatalf("%s not found", name)
 	}
 	cli := containerCLI{name: name, path: p}
-	if out, err := exec.Command(p, "info").CombinedOutput(); err != nil {
-		t.Fatalf("%s is not usable: %v\n%s", name, err, out)
-	}
+
 	if name == "docker" {
 		cli.specDir = os.Getenv(envDockerCDISpecDir)
 		if cli.specDir == "" {
 			cli.specDir = defaultDockerCDISpecDir
 		}
+
 		if err := os.MkdirAll(cli.specDir, 0o755); err != nil {
 			t.Fatalf("docker CDI spec dir %s is not writable: %v\n"+
 				"configure Docker to read a writable CDI spec directory, or create the default with:\n"+
@@ -69,6 +70,7 @@ func requireContainerCLI(t *testing.T) containerCLI {
 		}
 		chmodTraversable(t, cli.specDir)
 	}
+
 	return cli
 }
 
@@ -143,10 +145,10 @@ func (c containerCLI) deviceArgs(specDir string) []string {
 }
 
 func (c containerCLI) direnvPassthroughArgs() []string {
-	if c.name != "docker" {
-		return nil
+	if c.name == "docker" {
+		return []string{"--env", "DIRENV_DIR", "--env", "DIRENV_DIFF", "--env", "NIX_STORE_DIR"}
 	}
-	return []string{"--env", "DIRENV_DIR", "--env", "DIRENV_DIFF", "--env", "NIX_STORE_DIR"}
+	return nil
 }
 
 // writeExecScript writes content to path as an executable script (0755),
