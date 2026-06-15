@@ -86,13 +86,12 @@ func TestE2EFlakeDevShell(t *testing.T) {
 
 	// The generic device, hook = our built binary.
 	specDir := writeSpecForCLI(t, cli, bin)
-	device := cli.deviceArgs(specDir)
 
 	t.Run("hello_propagates_and_path_additive", func(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), cmdTimeout)
 		defer cancel()
-		args := []string{"exec", fixture, "env", "-u", "XDG_DATA_HOME", cli.path, "run", "--rm"}
-		args = append(args, device...)
+		args := []string{"exec", fixture, "env", "-u", "XDG_DATA_HOME", cli.path}
+		args = append(args, cli.runArgs(specDir)...)
 		args = append(args, cli.direnvPassthroughArgs()...)
 		args = append(args, busyboxImage, "sh", "-c", "hello; echo \"PATH=$PATH\"")
 		out, err := run(ctx, direnvEnv, "direnv", args...)
@@ -110,8 +109,8 @@ func TestE2EFlakeDevShell(t *testing.T) {
 	t.Run("base_tool_still_works", func(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), cmdTimeout)
 		defer cancel()
-		args := []string{"exec", fixture, "env", "-u", "XDG_DATA_HOME", cli.path, "run", "--rm"}
-		args = append(args, device...)
+		args := []string{"exec", fixture, "env", "-u", "XDG_DATA_HOME", cli.path}
+		args = append(args, cli.runArgs(specDir)...)
 		args = append(args, cli.direnvPassthroughArgs()...)
 		args = append(args, busyboxImage, "sh", "-c", "ls /bin/busybox >/dev/null && echo BASE_OK")
 		out, err := run(ctx, direnvEnv, "direnv", args...)
@@ -126,8 +125,8 @@ func TestE2EFlakeDevShell(t *testing.T) {
 	t.Run("gate_closed_without_direnv", func(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), cmdTimeout)
 		defer cancel()
-		args := []string{"-u", "DIRENV_DIR", "-u", "DIRENV_DIFF", cli.path, "run", "--rm"}
-		args = append(args, device...)
+		args := []string{"-u", "DIRENV_DIR", "-u", "DIRENV_DIFF", cli.path}
+		args = append(args, cli.runArgs(specDir)...)
 		args = append(args, busyboxImage, "hello")
 		out, _ := run(ctx, nil, "env", args...)
 		if strings.Contains(out, "Hello, world!") {

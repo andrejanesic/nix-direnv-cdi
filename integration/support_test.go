@@ -137,11 +137,16 @@ func writeSpecForCLI(t *testing.T, cli containerCLI, binPath string) string {
 	return specDir
 }
 
-func (c containerCLI) deviceArgs(specDir string) []string {
+// runArgs returns the CLI-specific argument segment that follows the binary
+// path: global flags, the `run` subcommand, --rm, and the generic device.
+// podman's --cdi-spec-dir is a *global* flag, so it must precede `run`; placing
+// it after `run` yields "unknown flag: --cdi-spec-dir". Docker reads its spec
+// dir from daemon config, so it only needs --device.
+func (c containerCLI) runArgs(specDir string) []string {
 	if c.name == "podman" {
-		return []string{"--cdi-spec-dir", specDir, "--device", cdispec.Ref}
+		return []string{"--cdi-spec-dir", specDir, "run", "--rm", "--device", cdispec.Ref}
 	}
-	return []string{"--device", cdispec.Ref}
+	return []string{"run", "--rm", "--device", cdispec.Ref}
 }
 
 func (c containerCLI) direnvPassthroughArgs() []string {
