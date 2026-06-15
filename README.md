@@ -1,11 +1,12 @@
 # nix-direnv-cdi
 
-**Your project's nix dev-shell — inside any container, with one flag.**
+**Your project's nix dev-shell — inside supported containers, with one flag.**
 
 You already have a perfect, reproducible toolchain in your `flake.nix`: the right
 Go, Node, compilers, linters, CLIs, pinned to the bit. nix-direnv-cdi teleports
-that dev-shell **into any OCI container** — no Dockerfile, no `apt-get`, no
-rebuilding images — by attaching a single CDI device:
+that dev-shell **into containers run by CDI-capable OCI runtimes** — no
+Dockerfile, no `apt-get`, no rebuilding images — by attaching a single CDI
+device:
 
 ```sh
 podman run --device nix-direnv-cdi.org/env=current <any-image> <your-tool>
@@ -58,6 +59,12 @@ services:
 
 ## Quick start
 
+Prerequisites:
+
+- Nix, direnv, and nix-direnv
+- flakes enabled if your project uses `use flake`
+- podman, or Docker Engine with CDI support
+
 **1. Install once per machine** (writes + registers the one generic device):
 
 ```sh
@@ -79,13 +86,17 @@ your per-user `~/.config/cdi` directory to `/etc/docker/daemon.json`.
 If that write needs privileges, the command prints the exact manual fallback:
 install the generated spec from `~/.config/cdi/nix-direnv.json` (or the matching
 `$XDG_CONFIG_HOME/cdi` path) to `/etc/cdi/nix-direnv.json`, for example with
-`sudo install -D -m 0644`.
+`sudo install -D -m 0644`. Per-runtime registration errors print manual fallback
+commands instead of making the whole install fail.
 
-Minimal smoke test:
+Minimal post-install smoke test:
 
 ```sh
 podman run --rm --device nix-direnv-cdi.org/env=current busybox true
 ```
+
+Expected result: no output and exit status 0. This proves the generic device
+resolves and the inert hook does not break a plain container.
 
 **2. In your project's `.envrc`:**
 
@@ -104,6 +115,24 @@ The device reference is always the constant `nix-direnv-cdi.org/env=current`.
 ```sh
 podman run --device nix-direnv-cdi.org/env=current <image> <cmd>
 ```
+
+For Docker, pass direnv's bookkeeping variables through to the OCI process env:
+
+```sh
+docker run --env DIRENV_DIR --env DIRENV_DIFF \
+  --device nix-direnv-cdi.org/env=current <image> <cmd>
+```
+
+End-to-end smoke test from inside a loaded dev-shell:
+
+```console
+$ podman run --rm --device nix-direnv-cdi.org/env=current busybox hello
+Hello, world!
+```
+
+Use a command that exists in your dev-shell but not in the image. The `hello`
+example assumes your dev-shell includes GNU hello, as the integration fixture
+does.
 
 ---
 
@@ -128,14 +157,34 @@ shell decides which dev-shell, at run time.
   [docs/security.md](docs/security.md).
 - **Surgical, not the whole store.** Only this project's closure is mounted,
   read-only (best-effort under rootless; nix store paths are immutable anyway).
-  Dev-shell env (incl. secrets) is read live and **never written to disk**.
+  Dev-shell env (incl. secrets) is read live and **never written to disk**. When
+  Docker passthrough is used, the wrapper unsets `DIRENV_DIR` and `DIRENV_DIFF`
+  before execing the real entrypoint.
 - **Runtimes.** Verified end-to-end on **podman** and **docker**. See
-  [docs/limitations.md](docs/limitations.md).
+  [docs/limitations.md](docs/limitations.md). Release validation runs the same
+  e2e suite with `NDC_CONTAINER_CLI=docker` and `NDC_CONTAINER_CLI=podman`.
 - **Docker daemon env.** Docker runs containers through a daemon, so pass
   `DIRENV_DIR` and `DIRENV_DIFF` through (`--env DIRENV_DIR --env DIRENV_DIFF`,
   or the Compose `environment` keys above) when using Docker directly.
 - **Limitation (T9).** An absolute path *into* the read-only store runs but isn't
   made additive — run dev-shell tools by name.
+
+## If nothing happens
+
+If the container runs but the dev-shell is missing:
+
+- Confirm you launched from the loaded dev-shell: `echo "$DIRENV_DIR"` should be
+  non-empty.
+- Re-run `nix-direnv-cdi gen` or reload direnv so `.direnv/cdi/mounts.json` is
+  current.
+- Confirm you passed `--device nix-direnv-cdi.org/env=current`.
+- For Docker, add `--env DIRENV_DIR --env DIRENV_DIFF`.
+- For `sudo`, preserve env with `sudo -E` or
+  `sudo --preserve-env=DIRENV_DIR,DIRENV_DIFF`.
+- For hook tracing, set `NDC_HOOK_LOG=/tmp/ndc-hook.log` before the container
+  command.
+
+Full troubleshooting: [docs/limitations.md](docs/limitations.md).
 
 ## Uninstall and manual rollback
 

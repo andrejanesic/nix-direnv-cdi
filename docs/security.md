@@ -42,6 +42,11 @@ container-creation time and injected only into the wrapped entrypoint's
 environment. The on-disk artifacts are just the generic device (a hook path) and
 `mounts.json` (a list of store paths) — no secrets.
 
+Docker users may pass `DIRENV_DIR` and `DIRENV_DIFF` through with `--env` so the
+daemon-created OCI process exposes the loaded direnv context to the hook. The
+wrapper unsets those bookkeeping variables before it execs the real entrypoint;
+they are an input to the hook, not part of the intended dev-shell environment.
+
 ## Privilege
 
 The hook runs with the privilege of whoever launched the container:

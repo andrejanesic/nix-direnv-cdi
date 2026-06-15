@@ -18,9 +18,9 @@ runtime frontend injects that device's `containerEdits` into the OCI
 { "hookName": "createRuntime", "path": "<installed binary>", "args": ["nix-direnv-cdi","hook"] }
 ```
 
-Because it's a **standard OCI hook embedded in the CDI device**, it runs under
-both **crun** (podman) and **runc** (docker) — the device is cross-runtime, and
-opt-in (it only runs on containers you attach it to).
+Because it's a **standard OCI hook embedded in the CDI device**, the same
+generic device works with the verified podman and Docker paths, and it is opt-in
+(it only runs on containers you attach it to).
 
 Daemon-driven CLIs such as Docker may not pass the client shell environment to
 the hook. For Docker, pass `DIRENV_DIR` and `DIRENV_DIFF` through to the OCI

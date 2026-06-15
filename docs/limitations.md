@@ -8,15 +8,19 @@ edges, see [internals.md](internals.md).)
 
 | Configuration | Status |
 |---|---|
-| **podman** | ✅ verified end-to-end |
-| **docker** | ✅ verified end-to-end |
+| **podman** | Verified end-to-end |
+| **docker** | Verified end-to-end |
 
 The shipped hook does **mount-namespace-only** entry, which is sufficient
 wherever the hook holds `CAP_SYS_ADMIN` in the userns owning the container's
 mount ns — i.e. podman and docker configurations.
 
-> **Docker** must have CDI enabled — on by default since Docker 28.3 (opt-in via
-> the `cdi` feature in 25.0–28.1). Podman supports CDI out of the box.
+Release validation runs the same e2e suite against Docker and podman by setting
+`NDC_CONTAINER_CLI=docker` or `NDC_CONTAINER_CLI=podman`.
+
+> **Docker** must have CDI enabled. Docker's documentation says CDI is Linux-only
+> and enabled by default since Docker Engine 28.3.0; older Docker versions may
+> need the `cdi` feature enabled explicitly. Podman supports CDI out of the box.
 > Docker users must pass the direnv bookkeeping variables through to the OCI
 > process env, for example `--env DIRENV_DIR --env DIRENV_DIFF`, because the
 > daemon may not inherit the client shell's loaded direnv environment.
@@ -31,11 +35,19 @@ dev-shell isn't there):
 - **Using `sudo`?** Add `-E` (`sudo` strips `DIRENV_DIR`/`DIRENV_DIFF`).
 - **Did `gen` run?** `.direnv/cdi/mounts.json` must exist and be current — re-run
   `nix-direnv-cdi gen`, or reload direnv.
+- **Using Docker?** Pass the direnv variables explicitly:
+  `docker run --env DIRENV_DIR --env DIRENV_DIFF --device nix-direnv-cdi.org/env=current ...`.
 - **Is the device found?** Run `nix-direnv-cdi install` once. Podman reads the
   user shared CDI dir registered by the drop-in; Docker reads
   `/etc/cdi/nix-direnv.json`.
 - **Still stuck?** Set `NDC_HOOK_LOG=/tmp/ndc-hook.log` in the launching
-  environment and read the hook's trace (gate decision, mounts, `DIRENV_DIFF`).
+  environment and read the hook's trace:
+  - `gate closed` means `DIRENV_DIR` was not visible to the hook.
+  - a `mounts.json` read error means `gen` has not run, the file is stale, or
+    the path is not traversable by the hook.
+  - `mount FAILED` means closure injection failed, but the hook still exits 0.
+  - a `DIRENV_DIFF` decode error means the dev-shell env could not be decoded
+    for additive `PATH`/env injection.
 
 ## Limitations
 
@@ -58,6 +70,9 @@ dev-shell isn't there):
 - **No workdir mount.** Project sources aren't mounted; add `-v $PWD:$PWD`.
 - **`sudo` strips the gate env** → device inert; use `sudo -E`. See the
   Troubleshooting note above and [security.md](security.md) for why.
+- **Other OCI launch paths are unverified.** The design is a standard CDI
+  `createRuntime` hook, but public support is limited to the podman and Docker
+  configurations above.
 
 ## Non-goals
 

@@ -1,10 +1,10 @@
 # Architecture
 
-nix-direnv-cdi makes a project's **nix-direnv dev-shell** usable inside any OCI
-container via **one generic CDI device**. The device carries no project data —
-only a `createRuntime` hook. At container-creation time that hook injects the
-project's dev-shell *dynamically*, reading what it needs from the loaded direnv
-environment it inherits.
+nix-direnv-cdi makes a project's **nix-direnv dev-shell** usable inside
+containers launched by supported CDI-capable OCI runtimes via **one generic CDI
+device**. The device carries no project data — only a `createRuntime` hook. At
+container-creation time that hook injects the project's dev-shell *dynamically*,
+reading what it needs from the loaded direnv environment it inherits.
 
 The result: a **single** registered device (`nix-direnv-cdi.org/env=current`)
 serves every project on the machine. No per-project specs, no fingerprints,

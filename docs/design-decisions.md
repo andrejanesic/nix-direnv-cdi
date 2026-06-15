@@ -31,7 +31,7 @@ We surveyed every way to get the closure into the container:
 
 | Approach | Verdict |
 |----------|---------|
-| **createRuntime hook enters the container mount ns** | ✅ chosen — OCI-standard (crun + runc), works rootless (verified) |
+| **createRuntime hook enters the container mount ns** | ✅ chosen — OCI-standard, verified with podman and Docker |
 | Static CDI `mounts` per project | ✗ forces per-project devices (the thing we're removing) |
 | Mount the **entire `/nix/store`** read-only (one generic mount) | ✗ rejected: too broad an exposure |
 | Host-side `mount` from the hook (no ns entry) | ✗ impossible: doesn't propagate into the container's mount ns |
