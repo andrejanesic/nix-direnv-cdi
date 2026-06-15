@@ -100,16 +100,24 @@ func build(t *testing.T) string {
 	return bin
 }
 
-// dumpTrace logs the env-independent hook breadcrumb file (<bin>.ndctrace), the
-// channel that survives even when NDC_HOOK_LOG does not reach the hook.
+// dumpTrace logs the env-independent breadcrumb files (<bin>.<pid>.ndctrace),
+// the channel that survives even when NDC_HOOK_LOG does not reach the hook. One
+// file per process (gen, hook, mount child), so dump them all.
 func dumpTrace(t *testing.T, binPath string) {
 	t.Helper()
-	p := binPath + ".ndctrace"
-	if b, err := os.ReadFile(p); err == nil && len(b) > 0 {
-		t.Logf("hook trace %s:\n%s", p, b)
+	matches, _ := filepath.Glob(binPath + ".*.ndctrace")
+	if len(matches) == 0 {
+		t.Logf("no hook trace files %s.*.ndctrace (hook never ran our code, or could not write one)", binPath)
 		return
 	}
-	t.Logf("hook trace %s missing/empty (hook never ran our code, or could not write it)", p)
+	for _, p := range matches {
+		b, err := os.ReadFile(p)
+		if err != nil {
+			t.Logf("hook trace %s unreadable: %v", p, err)
+			continue
+		}
+		t.Logf("hook trace %s:\n%s", p, b)
+	}
 }
 
 // chmodTraversable widens path and every ancestor to >=0755 so the rootless

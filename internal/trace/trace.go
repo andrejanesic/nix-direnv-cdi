@@ -12,16 +12,20 @@ import (
 	"os"
 )
 
-// Mark appends a formatted line to "<self>.ndctrace" next to the running binary.
+// Mark appends a formatted line to "<self>.<pid>.ndctrace" next to the running
+// binary. The pid suffix is essential: the same binary is invoked as several
+// processes (gen, the hook, the re-exec'd mount child) under DIFFERENT uids
+// under rootless podman, and a shared file created 0644 by one uid can't be
+// appended to by another — so each process gets its own world-readable file.
 func Mark(format string, args ...any) {
 	self, err := os.Executable()
 	if err != nil {
 		return
 	}
-	// 0666 (subject to umask) so a sub-uid hook and the test user can both
-	// touch/read it; O_APPEND so concurrent writers (hook + re-exec'd child)
-	// don't clobber each other.
-	f, err := os.OpenFile(self+".ndctrace", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o666)
+	path := fmt.Sprintf("%s.%d.ndctrace", self, os.Getpid())
+	// 0644 (subject to umask) so whatever uid creates it, the test user can read
+	// it back; O_APPEND so multiple Marks in one process accrete.
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 	if err != nil {
 		return
 	}
