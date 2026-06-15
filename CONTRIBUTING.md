@@ -28,10 +28,11 @@ the section with the detail.
    [Verification](#verification).
 2. **Build and vet pass** — `go build ./...` and `go vet ./...` succeed. See
    [Verification](#verification).
-3. **All tests pass** — `go test ./...` is green (unit plus the integration,
-   e2e, and installer suites for the selected container CLI). Missing
-   prerequisites are failures, not skips — and any deliberately skipped suite is
-   named in the PR. See [Validation Policy](#validation-policy) and
+3. **The full test suite is green** — `go test ./...` passes in CI (unit plus
+   the integration, e2e, and installer suites for the selected container CLI)
+   before merge. Missing prerequisites are failures, not skips, and any
+   deliberately skipped suite is named in the PR. Locally you need only run the
+   scope in [Validation Policy](#validation-policy); CI runs the rest. See also
    [Test Suites](#test-suites).
 4. **Tests cover the change** — new tests are added, or existing tests updated,
    to exercise the new or changed behavior.
@@ -133,8 +134,11 @@ go test ./... -skip '^(TestSynthetic|TestE2E)'
 
 ## Validation Policy
 
-Use the narrowest check that covers the risk, but do not rely only on unit tests
-for runtime behavior:
+This policy governs what *you* run locally while iterating — use the narrowest
+check that covers the risk. It does not relax the merge gate: CI runs the full
+suite (`go test ./...`) and it must be green before merge (see
+[PR checklist](#pr-checklist) item 3). Do not rely only on unit tests for
+runtime behavior:
 
 - Pure unit-level changes: run unit tests.
 - `internal/hook`, `internal/nsmount`, or `internal/cdispec` changes: run unit
