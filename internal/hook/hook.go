@@ -26,7 +26,6 @@ import (
 	"github.com/andrejanesic/nix-direnv-cdi/internal/devshell"
 	"github.com/andrejanesic/nix-direnv-cdi/internal/nsmount"
 	"github.com/andrejanesic/nix-direnv-cdi/internal/ociconfig"
-	"github.com/andrejanesic/nix-direnv-cdi/internal/trace"
 )
 
 // mountFunc injects the closure into the container's mount namespace. Injected
@@ -42,24 +41,15 @@ type getenvFunc func(string) (string, bool)
 // caller ignores the returned error and exits 0 so the container is never
 // broken.
 func Run(in io.Reader) error {
-	trace.Mark("hook.Run: entry")
 	state, err := ociconfig.ReadState(in)
 	if err != nil {
-		trace.Mark("hook.Run: ReadState err=%v", err)
 		return err
 	}
 	spec, err := ociconfig.Load(state.Bundle)
 	if err != nil {
-		trace.Mark("hook.Run: Load err=%v", err)
 		return err
 	}
-	trace.Mark("hook.Run: state+spec ok pid=%d bundle=%s", state.Pid, state.Bundle)
 	rootfs := resolveRootfs(spec, state.Bundle)
-	// Diagnostic: log as early as possible via both env channels (ambient +
-	// container config.json). If this line appears but run()'s do not, the fault
-	// is between here and the gate; if it never appears, NDC_HOOK_LOG reached the
-	// hook through neither channel.
-	debugLog(getenvWithProcessEnv(os.LookupEnv, spec))("Run: pid=%d bundle=%s rootfs=%q", state.Pid, state.Bundle, rootfs)
 	if rootfs == "" {
 		return nil
 	}
@@ -83,29 +73,16 @@ func resolveRootfs(spec *oci.Spec, bundle string) string {
 // in a loaded dev-shell is the authorization), then injects the closure mounts
 // and wraps the entrypoint for additive PATH + dev-shell env. Best-effort: a
 // mount failure is logged but never blocks the wrap or breaks the container.
-func run(state *oci.State, spec *oci.Spec, rootfs string, getenv getenvFunc, mount mountFunc) (rerr error) {
+func run(state *oci.State, spec *oci.Spec, rootfs string, getenv getenvFunc, mount mountFunc) error {
 	runtimeGetenv := getenvWithProcessEnv(getenv, spec)
 	dbg := debugLog(runtimeGetenv)
 
-	// A createRuntime hook must never break the container, so capture any panic
-	// into the debug log (the only window crun leaves open) and surface it as a
-	// returned error the caller already treats as best-effort.
-	defer func() {
-		if r := recover(); r != nil {
-			dbg("PANIC: %v", r)
-			rerr = fmt.Errorf("hook panic: %v", r)
-		}
-	}()
-
-	trace.Mark("run: entry")
 	dirRaw, ok := runtimeGetenv("DIRENV_DIR")
 	if !ok || dirRaw == "" {
-		trace.Mark("run: gate closed")
 		dbg("gate closed: DIRENV_DIR unset; device inert")
 		return nil // not in an approved dev-shell -> the device is inert
 	}
 	project := strings.TrimPrefix(dirRaw, "-") // direnv's leading '-' marker
-	trace.Mark("run: gate open project=%s", project)
 	dbg("gate open: project=%s pid=%d rootfs=%s", project, state.Pid, rootfs)
 
 	// 1. Inject the project's closure mounts (best-effort). The allowlist root
@@ -115,22 +92,17 @@ func run(state *oci.State, spec *oci.Spec, rootfs string, getenv getenvFunc, mou
 		storeDir = v
 	}
 	closure, rerr := devshell.ReadMounts(filepath.Join(project, ".direnv", "cdi", "mounts.json"), storeDir)
-	trace.Mark("run: mounts.json closure=%d readErr=%v", len(closure), rerr)
 	dbg("mounts.json: %d paths, readErr=%v", len(closure), rerr)
 	if rerr == nil && len(closure) > 0 && state.Pid > 0 {
-		trace.Mark("run: mount start pid=%d", state.Pid)
 		if merr := mount(state.Pid, rootfs, closure); merr != nil {
-			trace.Mark("run: mount FAILED %v", merr)
 			dbg("mount FAILED: %v", merr)
 			fmt.Fprintln(os.Stderr, "nix-direnv-cdi hook: mount (ignored):", merr)
 		} else {
-			trace.Mark("run: mount OK")
 			dbg("mount OK: %d paths bound under %s", len(closure), rootfs)
 		}
 	}
 
 	// 2. Additive PATH + dev-shell env via entrypoint wrapping.
-	trace.Mark("run: wrap start")
 	prefix, env, has, derr := devshell.RuntimeEnv(runtimeGetenv)
 	dbg("runtimeEnv: prefix=%d env=%d has=%v err=%v", len(prefix), len(env), has, derr)
 	if derr != nil {
@@ -139,9 +111,7 @@ func run(state *oci.State, spec *oci.Spec, rootfs string, getenv getenvFunc, mou
 	if !has {
 		return nil
 	}
-	werr := wrapEntrypoint(spec, rootfs, prefix, env)
-	trace.Mark("run: wrap done err=%v", werr)
-	return werr
+	return wrapEntrypoint(spec, rootfs, prefix, env)
 }
 
 func getenvWithProcessEnv(getenv getenvFunc, spec *oci.Spec) getenvFunc {

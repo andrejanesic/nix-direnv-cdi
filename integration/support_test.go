@@ -27,7 +27,7 @@ const (
 	envDockerCDISpecDir = "NDC_DOCKER_CDI_SPEC_DIR"
 	defaultContainerCLI = "docker"
 	// defaultCDISpecDir is a directory both docker and podman scan for CDI specs
-	// by default (podman: built-in /etc/cdi). Docker uses it as cli.specDir;
+	// by default (podman's built-in /etc/cdi). Docker uses it as cli.specDir;
 	// podman writes here when usable so no per-run flag/override is needed.
 	defaultCDISpecDir = "/etc/cdi"
 )
@@ -97,30 +97,7 @@ func build(t *testing.T) string {
 		t.Fatalf("go build: %v\n%s", err, out)
 	}
 	chmodTraversable(t, bin)
-	// The hook writes an env-independent breadcrumb to <bin>.ndctrace; widen the
-	// bin dir so a sub-uid hook can create it (chmodTraversable left it 0755).
-	_ = os.Chmod(dir, 0o777)
 	return bin
-}
-
-// dumpTrace logs the env-independent breadcrumb files (<bin>.<pid>.ndctrace),
-// the channel that survives even when NDC_HOOK_LOG does not reach the hook. One
-// file per process (gen, hook, mount child), so dump them all.
-func dumpTrace(t *testing.T, binPath string) {
-	t.Helper()
-	matches, _ := filepath.Glob(binPath + ".*.ndctrace")
-	if len(matches) == 0 {
-		t.Logf("no hook trace files %s.*.ndctrace (hook never ran our code, or could not write one)", binPath)
-		return
-	}
-	for _, p := range matches {
-		b, err := os.ReadFile(p)
-		if err != nil {
-			t.Logf("hook trace %s unreadable: %v", p, err)
-			continue
-		}
-		t.Logf("hook trace %s:\n%s", p, b)
-	}
 }
 
 // chmodTraversable widens path and every ancestor to >=0755 so the rootless
@@ -142,23 +119,20 @@ func writeGenericSpec(t *testing.T, dir, binPath string) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	// Pass the diagnostic trace base via argv (--ndctrace=<binPath>) so the hook
-	// can record breadcrumbs without relying on /proc or env reaching it; the
-	// test reads them back via dumpTrace globbing <binPath>.*.ndctrace.
 	spec := fmt.Sprintf(`{"cdiVersion":"0.6.0","kind":%q,"devices":[`+
 		`{"name":%q,"containerEdits":{"hooks":[`+
-		`{"hookName":"createRuntime","path":%q,"args":["nix-direnv-cdi","hook",%q]}]}}]}`+"\n",
-		cdispec.Kind, cdispec.Device, binPath, "--ndctrace="+binPath)
+		`{"hookName":"createRuntime","path":%q,"args":["nix-direnv-cdi","hook"]}]}}]}`+"\n",
+		cdispec.Kind, cdispec.Device, binPath)
 	specPath := filepath.Join(dir, "nix-direnv.json")
 	if err := os.WriteFile(specPath, []byte(spec), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	// Remove the spec on cleanup. When dir is a shared default scan dir (docker's
-	// /etc/cdi) the file outlives the test's temp binary it points at; a later
-	// test or CI step (e.g. the podman e2e, which also scans /etc/cdi) would then
+	// Remove the spec on cleanup. When dir is a shared default scan dir (/etc/cdi)
+	// the file outlives the test's temp binary it points at; a later test or CI
+	// step (e.g. the podman e2e, which also scans /etc/cdi) would otherwise
 	// resolve the same device to this STALE spec and exec a deleted binary —
-	// "error executing hook (exit code: 1)". t.Cleanup runs at the end of the
-	// test, before the process exits, so the next CI step starts clean.
+	// "error executing hook (exit code: 1)". t.Cleanup runs before the process
+	// exits, so the next CI step starts clean.
 	t.Cleanup(func() { _ = os.Remove(specPath) })
 	chmodTraversable(t, dir)
 }
@@ -168,13 +142,12 @@ func writeGenericSpec(t *testing.T, dir, binPath string) {
 //
 // For podman we prefer a default scan dir (/etc/cdi) that podman reads with no
 // extra config — this works on every podman version (the --cdi-spec-dir flag is
-// 5.1+) and, crucially, matches the dir podman actually scans on CI, so there is
-// no chance of resolving the device to a stale spec in a different dir. The spec
-// is removed on cleanup (writeGenericSpec), so it never goes stale. When no
-// default dir is writable (local rootful podman without a writable /etc/cdi) we
-// fall back to a hermetic temp dir advertised via containers.conf's cdi_spec_dirs
-// (field present since containers-common 0.58 / podman 4.9), merged on top of the
-// system config with CONTAINERS_CONF_OVERRIDE.
+// 5.1+) and matches the dir podman actually scans on CI, so the device can't
+// resolve to a stale spec elsewhere. When no default dir is writable (local
+// rootless/rootful podman without a writable /etc/cdi) we fall back to a hermetic
+// temp dir advertised via containers.conf's cdi_spec_dirs (present since
+// containers-common 0.58 / podman 4.9), merged over the system config with
+// CONTAINERS_CONF_OVERRIDE.
 func writeSpecForCLI(t *testing.T, cli containerCLI, binPath string) {
 	t.Helper()
 	if cli.name == "docker" {
@@ -198,8 +171,8 @@ func writeSpecForCLI(t *testing.T, cli containerCLI, binPath string) {
 }
 
 // dirUsable reports whether dir can be created (if needed) and written to by the
-// current user — used to decide whether podman's spec can live in a shared
-// default scan dir or must use the temp-dir + containers.conf fallback.
+// current user, deciding whether podman's spec can live in a shared default scan
+// dir or must use the temp-dir + containers.conf fallback.
 func dirUsable(dir string) bool {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return false
@@ -213,9 +186,9 @@ func dirUsable(dir string) bool {
 }
 
 // runArgs returns the argument segment that follows the binary path: the `run`
-// subcommand, --rm, and the generic device. Both docker and podman locate the
-// CDI spec dir out of band (daemon config / containers.conf via
-// writeSpecForCLI), so no per-run spec-dir flag is needed.
+// subcommand, --rm, and the generic device. Both CLIs locate the CDI spec dir
+// out of band (docker via daemon config, podman via its default scan dir or the
+// containers.conf set in writeSpecForCLI), so no per-run spec-dir flag is needed.
 func (c containerCLI) runArgs() []string {
 	return []string{"run", "--rm", "--device", cdispec.Ref}
 }
@@ -260,48 +233,6 @@ func encodeDirenvDiff(t *testing.T, prev, next map[string]string) string {
 		t.Fatal(err)
 	}
 	return base64.URLEncoding.EncodeToString(buf.Bytes())
-}
-
-// dumpHookLog logs the contents of the createRuntime hook's debug log (written
-// when NDC_HOOK_LOG is set) so a failing run reveals where the hook stopped.
-// Under rootless podman the hook runs as a mapped sub-uid and the log is owned
-// by that uid (mode 0600), so a direct read fails; fall back to reading it
-// inside podman's user namespace via `podman unshare cat`. An unreadable or
-// missing log is reported, not fatal.
-func dumpHookLog(t *testing.T, cli containerCLI, path string) {
-	t.Helper()
-	if path == "" {
-		return
-	}
-	if b, err := os.ReadFile(path); err == nil {
-		logBlob(t, path, "direct", b)
-		return
-	}
-	if cli.name == "podman" {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
-		out, err := run(ctx, nil, cli.path, "unshare", "cat", path)
-		if err == nil {
-			logBlob(t, path, "podman unshare", []byte(out))
-			return
-		}
-		// Surface whether the file exists at all (and its owner/mode).
-		lsCtx, lsCancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer lsCancel()
-		ls, _ := run(lsCtx, nil, cli.path, "unshare", "ls", "-la", filepath.Dir(path))
-		t.Logf("hook log %s unreadable via unshare: %v\ndir listing:\n%s", path, err, ls)
-		return
-	}
-	t.Logf("hook log %s unreadable", path)
-}
-
-func logBlob(t *testing.T, path, via string, b []byte) {
-	t.Helper()
-	if len(b) == 0 {
-		t.Logf("hook log %s (%s) is empty (hook produced no diagnostics)", path, via)
-		return
-	}
-	t.Logf("hook log %s (%s):\n%s", path, via, b)
 }
 
 // run executes name with args and extraEnv (appended to os.Environ), returning

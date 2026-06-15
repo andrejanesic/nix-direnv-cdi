@@ -15,8 +15,6 @@ import (
 	"github.com/andrejanesic/nix-direnv-cdi/internal/devshell"
 	"github.com/andrejanesic/nix-direnv-cdi/internal/hook"
 	"github.com/andrejanesic/nix-direnv-cdi/internal/install"
-	"github.com/andrejanesic/nix-direnv-cdi/internal/nsmount"
-	"github.com/andrejanesic/nix-direnv-cdi/internal/trace"
 )
 
 // These are overridden at build time via -ldflags. Release builds set version
@@ -42,7 +40,6 @@ Commands:
 Run "nix-direnv-cdi <command> -h" for command-specific flags.`
 
 func main() {
-	trace.Mark("main: entry argv=%v", os.Args) // diagnostic: env-independent proof of life
 	if len(os.Args) < 2 {
 		fmt.Fprintln(os.Stderr, usage)
 		os.Exit(2)
@@ -56,15 +53,6 @@ func main() {
 		// Best-effort by contract: a hook must never break the container, so
 		// cmdHook reports errors but the process always exits 0.
 		cmdHook(args)
-	case nsmount.ChildSubcommand:
-		// Hidden: the mount child re-exec'd by the hook (not user-facing). It
-		// enters the container mount ns and binds the closure, then exits. A
-		// non-zero exit is surfaced to the parent hook, which treats mount
-		// injection as best-effort.
-		if err := nsmount.RunChild(args, os.Stdin); err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			os.Exit(1)
-		}
 	case "install":
 		exitOnErr(cmdInstall(args))
 	case "uninstall":
@@ -92,24 +80,6 @@ func formatVersion() string {
 		out += " (" + strings.Join(fields, ", ") + ")"
 	}
 	return out
-}
-
-// hookBreadcrumb appends msg to the file named by NDC_HOOK_LOG (read from this
-// process's own environment — the ambient channel), or no-ops when unset. This
-// is a diagnostic for the createRuntime hook, whose stderr crun discards; it
-// reveals whether the hook binary ran our code and whether ambient env reached
-// it. Best-effort and silent on any error.
-func hookBreadcrumb(msg string) {
-	p := os.Getenv("NDC_HOOK_LOG")
-	if p == "" {
-		return
-	}
-	f, err := os.OpenFile(p, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
-	if err != nil {
-		return
-	}
-	defer f.Close()
-	fmt.Fprintf(f, "nix-direnv-cdi main: %s\n", msg)
 }
 
 func exitOnErr(err error) {
@@ -171,25 +141,11 @@ func sharedSpecDir() (string, error) {
 	return filepath.Join(home, ".config", "cdi"), nil
 }
 
-// cmdHook runs the createRuntime hook. It is best-effort: any error — including
-// a panic — is reported to stderr but the process still exits 0, so a failure
-// never breaks the container. The panic guard matters because crun fails the
-// container whenever a createRuntime hook exits non-zero (a Go panic would
-// otherwise exit 2), so an unexpected fault in mount injection or the
-// entrypoint wrap must degrade gracefully rather than abort the run.
+// cmdHook runs the createRuntime hook. It is best-effort: any error is reported
+// to stderr but the process still exits 0, so a failure never breaks the
+// container.
 func cmdHook(args []string) {
-	trace.Mark("cmdHook: entry")     // diagnostic: env-independent
-	hookBreadcrumb("cmdHook: entry") // diagnostic: proves the binary ran our code
-	defer func() {
-		if r := recover(); r != nil {
-			hookBreadcrumb(fmt.Sprintf("cmdHook: PANIC %v", r))
-			fmt.Fprintln(os.Stderr, "nix-direnv-cdi hook (panic, ignored):", r)
-		}
-	}()
 	fs := flag.NewFlagSet("hook", flag.ContinueOnError)
-	// Diagnostic: accept (and ignore) the trace-path flag the test embeds in the
-	// CDI hook args; trace.Mark reads it straight from os.Args.
-	_ = fs.String("ndctrace", "", "diagnostic trace base path")
 	if err := fs.Parse(args); err != nil {
 		fmt.Fprintln(os.Stderr, "nix-direnv-cdi hook:", err)
 		return

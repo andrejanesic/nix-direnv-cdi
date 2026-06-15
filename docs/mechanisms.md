@@ -49,8 +49,7 @@ container. (File *writes* into the rootfs do propagate; mounts do not.)
 1. read `<project>/.direnv/cdi/mounts.json` (the closure, located via the
    inherited `DIRENV_DIR`);
 2. `unshare(CLONE_FS)` then `setns(CLONE_NEWNS)` into the container's mount ns
-   (in a short-lived re-exec'd child process — see
-   [internals.md](internals.md));
+   (on a dedicated, discarded OS thread — see [internals.md](internals.md));
 3. for each closure path, bind it onto `<rootfs>/<path>` (read-only,
    best-effort).
 

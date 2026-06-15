@@ -87,33 +87,15 @@ func TestE2EFlakeDevShell(t *testing.T) {
 	// The generic device, hook = our built binary.
 	writeSpecForCLI(t, cli, bin)
 
-	// crun swallows the createRuntime hook's stderr, so point the hook at a log
-	// file (best-effort debug knob) and dump it when a run fails — this is the
-	// only window into why the hook misbehaved on a given runtime/host. Under
-	// rootless podman the hook runs as a mapped sub-uid, so the log dir must be
-	// world-writable for the hook to create the file (and dumpHookLog reads it
-	// back through `podman unshare`).
-	hookLogDir := filepath.Join(work, "hooklog")
-	if err := os.MkdirAll(hookLogDir, 0o777); err != nil {
-		t.Fatal(err)
-	}
-	chmodTraversable(t, hookLogDir) // make ancestors traversable (0755)...
-	_ = os.Chmod(hookLogDir, 0o777) // ...then force the leaf world-writable
-	hookLog := filepath.Join(hookLogDir, "hook.log")
-	t.Setenv("NDC_HOOK_LOG", hookLog)
-
 	t.Run("hello_propagates_and_path_additive", func(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), cmdTimeout)
 		defer cancel()
 		args := []string{"exec", fixture, "env", "-u", "XDG_DATA_HOME", cli.path}
 		args = append(args, cli.runArgs()...)
 		args = append(args, cli.direnvPassthroughArgs()...)
-		args = append(args, "--env", "NDC_HOOK_LOG") // diagnostic: container-env channel for the hook log
 		args = append(args, busyboxImage, "sh", "-c", "hello; echo \"PATH=$PATH\"")
 		out, err := run(ctx, direnvEnv, "direnv", args...)
 		if err != nil {
-			dumpHookLog(t, cli, hookLog)
-			dumpTrace(t, bin)
 			t.Fatalf("%s run: %v\n%s", cli.name, err, out)
 		}
 		if !strings.Contains(out, "Hello, world!") {
@@ -130,12 +112,9 @@ func TestE2EFlakeDevShell(t *testing.T) {
 		args := []string{"exec", fixture, "env", "-u", "XDG_DATA_HOME", cli.path}
 		args = append(args, cli.runArgs()...)
 		args = append(args, cli.direnvPassthroughArgs()...)
-		args = append(args, "--env", "NDC_HOOK_LOG") // diagnostic: container-env channel for the hook log
 		args = append(args, busyboxImage, "sh", "-c", "ls /bin/busybox >/dev/null && echo BASE_OK")
 		out, err := run(ctx, direnvEnv, "direnv", args...)
 		if err != nil {
-			dumpHookLog(t, cli, hookLog)
-			dumpTrace(t, bin)
 			t.Fatalf("%s run: %v\n%s", cli.name, err, out)
 		}
 		if !strings.Contains(out, "BASE_OK") {
