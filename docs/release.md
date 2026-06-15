@@ -109,7 +109,7 @@ Verify cosign keyless signatures with the release workflow identity:
 ```sh
 cosign verify-blob nix-direnv-cdi_v0.1.0_linux_amd64 \
   --bundle nix-direnv-cdi_v0.1.0_linux_amd64.bundle \
-  --certificate-identity-regexp 'https://github.com/andrejanesic/nix-direnv-cdi/.github/workflows/release.yml@refs/tags/v.*' \
+  --certificate-identity-regexp 'https://github.com/andrejanesic/nix-direnv-cdi/.github/workflows/release.yaml@refs/tags/v.*' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 ```
 
