@@ -5,29 +5,28 @@
 **Sandbox a coding agent in a throwaway container with your real, pinned project
 toolchain — no per-repo agent image to build or maintain.**
 
+Simple, fast and secure.
+
 ```sh
 # docker
 docker run \
   --env DIRENV_DIR \
   --env DIRENV_DIFF \
   --device nix-direnv-cdi.org/env=current -v "$PWD:$PWD" -w "$PWD" \
-  ubuntu claude
+  ubuntu claude  # Claude now has access to your shell.nix tools
 
 # podman
 podman run \
   --device nix-direnv-cdi.org/env=current -v "$PWD:$PWD" \
   -w "$PWD" \
-  ubuntu codex
+  ubuntu codex  # Codex now has access to your shell.nix tools
 ```
 
-The agent gets your full `flake.nix` dev-shell — identical to yours, nothing
-baked into the image — yet stays boxed in. Only this project's `/nix/store`
-closure is shared, read-only and surgical (never the whole store), so the agent
-runs your real tools without mutating them or reaching the rest of your machine.
-The dev-shell env (including secrets) is read live and **never written to disk**,
-and the device is **inert** unless launched from the loaded dev-shell. One
-generic device serves every project; the right dev-shell is chosen automatically
-at run time from the direnv environment you're already in.
+That's it — no custom Docker images or in-container direnv required.
+nix-direnv-cdi automatically mounts the required Nix store paths from your
+host machine and updates the entrypoint PATH, so your agent sees the exact
+same tools you use in your own shell. Safe (read-only mounts), automatic
+and fast.
 
 ## Use it
 
