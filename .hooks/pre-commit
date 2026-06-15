@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+#
+# pre-commit: gofmt gate.
+#
+# Mirrors the "Format check" step in .github/workflows/ci.yaml so unformatted
+# code is caught before it leaves your machine. Only staged .go files are
+# checked, so this stays fast.
+#
+# Activate with: ./.hooks/install.sh   (sets core.hooksPath to .hooks)
+
+set +a -Eeuo pipefail
+
+# Staged Go files that are Added, Copied, or Modified (not Deleted/Renamed-away).
+mapfile -t staged < <(git diff --cached --name-only --diff-filter=ACM -- '*.go')
+
+if [ "${#staged[@]}" -eq 0 ]; then
+  exit 0
+fi
+
+unformatted="$(gofmt -l -- "${staged[@]}")"
+
+if [ -n "$unformatted" ]; then
+  echo "gofmt: the following staged files need formatting:" >&2
+  echo "$unformatted" >&2
+  echo >&2
+  echo "Run 'gofmt -w' on them (then 'git add'), e.g.:" >&2
+  echo "  gofmt -w $unformatted" >&2
+  exit 1
+fi
