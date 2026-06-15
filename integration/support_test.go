@@ -23,10 +23,13 @@ const (
 	cmdTimeout   = 5 * time.Minute
 	busyboxImage = "busybox"
 
-	envContainerCLI         = "NDC_CONTAINER_CLI"
-	envDockerCDISpecDir     = "NDC_DOCKER_CDI_SPEC_DIR"
-	defaultContainerCLI     = "docker"
-	defaultDockerCDISpecDir = "/etc/cdi"
+	envContainerCLI     = "NDC_CONTAINER_CLI"
+	envDockerCDISpecDir = "NDC_DOCKER_CDI_SPEC_DIR"
+	defaultContainerCLI = "docker"
+	// defaultCDISpecDir is a directory both docker and podman scan for CDI specs
+	// by default (podman: built-in /etc/cdi). Docker uses it as cli.specDir;
+	// podman writes here when usable so no per-run flag/override is needed.
+	defaultCDISpecDir = "/etc/cdi"
 )
 
 type containerCLI struct {
@@ -59,7 +62,7 @@ func requireContainerCLI(t *testing.T) containerCLI {
 	if name == "docker" {
 		cli.specDir = os.Getenv(envDockerCDISpecDir)
 		if cli.specDir == "" {
-			cli.specDir = defaultDockerCDISpecDir
+			cli.specDir = defaultCDISpecDir
 		}
 
 		if err := os.MkdirAll(cli.specDir, 0o755); err != nil {
@@ -146,23 +149,40 @@ func writeGenericSpec(t *testing.T, dir, binPath string) {
 		`{"name":%q,"containerEdits":{"hooks":[`+
 		`{"hookName":"createRuntime","path":%q,"args":["nix-direnv-cdi","hook",%q]}]}}]}`+"\n",
 		cdispec.Kind, cdispec.Device, binPath, "--ndctrace="+binPath)
-	if err := os.WriteFile(filepath.Join(dir, "nix-direnv.json"), []byte(spec), 0o644); err != nil {
+	specPath := filepath.Join(dir, "nix-direnv.json")
+	if err := os.WriteFile(specPath, []byte(spec), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	// Remove the spec on cleanup. When dir is a shared default scan dir (docker's
+	// /etc/cdi) the file outlives the test's temp binary it points at; a later
+	// test or CI step (e.g. the podman e2e, which also scans /etc/cdi) would then
+	// resolve the same device to this STALE spec and exec a deleted binary —
+	// "error executing hook (exit code: 1)". t.Cleanup runs at the end of the
+	// test, before the process exits, so the next CI step starts clean.
+	t.Cleanup(func() { _ = os.Remove(specPath) })
 	chmodTraversable(t, dir)
 }
 
 // writeSpecForCLI writes the generic CDI device where the selected CLI will find
-// it. Docker reads its spec dir from daemon config (cli.specDir). For podman we
-// write to a hermetic temp dir and point podman at it via containers.conf: the
-// global --cdi-spec-dir flag only exists since podman 5.1, whereas the
-// cdi_spec_dirs config field predates it (containers-common 0.58 / podman 4.9),
-// so this works across the podman versions CI may have. CONTAINERS_CONF_OVERRIDE
-// is merged on top of the system config, preserving rootless defaults.
+// it. Docker reads its spec dir from daemon config (cli.specDir).
+//
+// For podman we prefer a default scan dir (/etc/cdi) that podman reads with no
+// extra config — this works on every podman version (the --cdi-spec-dir flag is
+// 5.1+) and, crucially, matches the dir podman actually scans on CI, so there is
+// no chance of resolving the device to a stale spec in a different dir. The spec
+// is removed on cleanup (writeGenericSpec), so it never goes stale. When no
+// default dir is writable (local rootful podman without a writable /etc/cdi) we
+// fall back to a hermetic temp dir advertised via containers.conf's cdi_spec_dirs
+// (field present since containers-common 0.58 / podman 4.9), merged on top of the
+// system config with CONTAINERS_CONF_OVERRIDE.
 func writeSpecForCLI(t *testing.T, cli containerCLI, binPath string) {
 	t.Helper()
 	if cli.name == "docker" {
 		writeGenericSpec(t, cli.specDir, binPath)
+		return
+	}
+	if dirUsable(defaultCDISpecDir) {
+		writeGenericSpec(t, defaultCDISpecDir, binPath)
 		return
 	}
 	base := t.TempDir()
@@ -175,6 +195,21 @@ func writeSpecForCLI(t *testing.T, cli containerCLI, binPath string) {
 		t.Fatal(err)
 	}
 	t.Setenv("CONTAINERS_CONF_OVERRIDE", conf)
+}
+
+// dirUsable reports whether dir can be created (if needed) and written to by the
+// current user — used to decide whether podman's spec can live in a shared
+// default scan dir or must use the temp-dir + containers.conf fallback.
+func dirUsable(dir string) bool {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return false
+	}
+	probe := filepath.Join(dir, ".ndc-probe")
+	if err := os.WriteFile(probe, nil, 0o644); err != nil {
+		return false
+	}
+	_ = os.Remove(probe)
+	return true
 }
 
 // runArgs returns the argument segment that follows the binary path: the `run`
