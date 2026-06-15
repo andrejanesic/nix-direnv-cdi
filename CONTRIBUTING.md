@@ -124,6 +124,17 @@ Docker must also have CDI enabled and include that directory in
 `cdi-spec-dirs`. The CI workflow configures this before running Docker
 integration.
 
+Podman discovers CDI specs from its default scan dirs (`/etc/cdi`,
+`/var/run/cdi`). When `NDC_CONTAINER_CLI=podman` the tests write the generic
+spec to `/etc/cdi` if it is writable (the same dir Docker uses), and otherwise
+fall back to a hermetic temp dir advertised through `CONTAINERS_CONF_OVERRIDE`'s
+`cdi_spec_dirs`. That keeps the suite working on podman versions before 5.1,
+which lack the global `--cdi-spec-dir` flag — do not reintroduce it. Each test
+removes the spec it writes on cleanup: a stale spec left in the shared `/etc/cdi`
+points at a since-deleted temp binary, and a later test or CI step would then
+resolve the same device to it and fail with
+`error executing hook (exit code: 1)`.
+
 Use `-skip` when you intentionally cannot run a suite:
 
 ```sh
