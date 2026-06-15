@@ -15,9 +15,9 @@ permissions:
 
 jobs:
   analyze:
-    name: Analyze (go)
     runs-on: ubuntu-latest
     permissions:
+      actions: read # read workflow run metadata (fingerprints/telemetry)
       contents: read
       security-events: write # upload results to the Security tab
     steps:
