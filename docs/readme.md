@@ -12,8 +12,8 @@ top-level [README](../README.md).
 | [decisions.md](decisions.md) | everyone | Why it's shaped this way, with the alternatives considered and rejected. |
 | [security.md](security.md) | users | The authorization model (the gate), exposure surface, read-only mounts, and secrets handling. |
 | [limitations.md](limitations.md) | users | Limitations, non-goals, the runtime support matrix, and troubleshooting. |
-| [../CONTRIBUTING.md](../CONTRIBUTING.md) | contributors + maintainers | Build/test commands, validation policy, review checklists, hook debugging, and maintainer responsibilities. |
 | [release.md](release.md) | users + maintainers | Release channels, artifact verification, upgrade, rollback, and the release checklist. |
+| [../CONTRIBUTING.md](../CONTRIBUTING.md) | contributors + maintainers | Build/test commands, validation policy, review checklists, hook debugging, and maintainer responsibilities. |
 | [internals.md](internals.md) | maintainers | The non-obvious, load-bearing kernel/Go traps the implementation depends on. |
 
 ## Suggested reading order

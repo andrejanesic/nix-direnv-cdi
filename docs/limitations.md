@@ -40,9 +40,8 @@ dev-shell isn't there):
 - **Is the device found?** Run `nix-direnv-cdi install` once. Podman reads the
   user shared CDI dir registered by the drop-in; Docker reads
   `/etc/cdi/nix-direnv.json`.
-- **Still stuck?** Set `NDC_HOOK_LOG` to a private file in the launching
-  environment (e.g. `"$XDG_RUNTIME_DIR/ndc-hook.log"`; it is created `0600` and
-  will not follow a symlink) and read the hook's trace:
+- **Still stuck?** Set `NDC_HOOK_LOG` (for example:
+  `$XDG_RUNTIME_DIR/ndc-hook.log`) and read the hook's trace:
   - `gate closed` means `DIRENV_DIR` was not visible to the hook.
   - a `mounts.json` read error means `gen` has not run, the file is stale, or
     the path is not traversable by the hook.

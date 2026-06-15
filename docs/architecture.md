@@ -4,11 +4,9 @@ nix-direnv-cdi makes a project's **nix-direnv dev-shell** usable inside
 containers launched by supported CDI-capable OCI runtimes via **one generic CDI
 device**. The device carries no project data — only a `createRuntime` hook. At
 container-creation time that hook injects the project's dev-shell *dynamically*,
-reading what it needs from the loaded direnv environment it inherits.
-
-The result: a **single** registered device (`nix-direnv-cdi.org/env=current`)
-serves every project on the machine. No per-project specs, no fingerprints,
-nothing baked.
+reading what it needs from the loaded direnv environment it inherits. This
+enables the process inside the container to use the same dev-shell environment
+_and_ host's Nix packages, without rebuilding inside the container.
 
 ## Two phases
 

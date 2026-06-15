@@ -1,8 +1,8 @@
-# Internals & load-bearing hacks
+# Internals
 
 **For maintainers — read this before changing the hook or `nsmount`.** The
-non-obvious, hard-won kernel/Go details the implementation depends on. Each was a
-real trap; several were only caught by running against a live runtime. (For
+non-obvious, hard-won kernel/Go details the implementation depends on. Each was
+a real trap; several were only caught by running against a live runtime. (For
 user-facing limitations and runtime support, see
 [limitations.md](limitations.md).)
 

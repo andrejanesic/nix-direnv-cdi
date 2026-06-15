@@ -157,7 +157,7 @@ TIME A  podman frontend
   loads ~/.config/cdi/nix-direnv.json → injects the createRuntime hook into config.json
 
 TIME B  crun creates the container
-  ┌─ namespaces created; rootfs + mounts performed ────────────────────────┐
+  ┌─ namespaces created; rootfs + mounts performed ─────────────────────────┐
   │  ► createRuntime hook fires (host ns, container pid known, pre-pivot)   │
   │      reads:  OCI State (stdin) ........... pid, bundle                  │
   │             config.json ................. rootfs, process.args, PATH    │
@@ -168,7 +168,7 @@ TIME B  crun creates the container
   │             (mechanism 2)                                               │
   │      wrap:  decode DIRENV_DIFF → prefix+env; shim the entrypoint        │
   │             (mechanism 3)                                               │
-  │  pivot_root                                                            │
+  │  pivot_root                                                             │
   └─────────────────────────────────────────────────────────────────────────┘
 
 TIME C  the (wrapped) entrypoint execs

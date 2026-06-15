@@ -6,15 +6,13 @@ documentation, start at **[docs/readme.md](docs/readme.md)**.
 ## What this project is
 
 `nix-direnv-cdi` makes a project's **nix-direnv dev-shell** available inside any
-OCI container (podman, docker) via **one generic CDI device**. The device holds
+OCI container (docker, podman) via **one generic CDI device**. The device holds
 no project data — only a `createRuntime` hook. At `podman run --device …` the
-hook, which inherits the loaded direnv environment, **bind-mounts the dev-shell's
-`/nix/store` closure into the container** (by entering its mount namespace) and
-**wraps the entrypoint** for additive `PATH` + dev-shell env. One device serves
-every project; the launching shell decides which dev-shell at run time.
-
-A single Go binary, no runtime deps. CLI:
-`gen | hook | install | uninstall | version`.
+hook, which inherits the loaded direnv environment, **bind-mounts the
+dev-shell's `/nix/store` closure into the container** (by entering its mount
+namespace) and **wraps the entrypoint** for additive `PATH` + dev-shell env. One
+device serves every project; the launching shell decides which dev-shell at
+run time.
 
 ## Repo map
 
@@ -28,45 +26,33 @@ A single Go binary, no runtime deps. CLI:
 | `internal/ociconfig/` | read OCI State (stdin) + `config.json` |
 | `internal/install/` | register the device dir with podman/docker (backup-then-auto) |
 | `integration/` | synthetic and e2e integration tests plus the flake fixture |
+| `contrib/use_cdi.sh` | optional `use cdi` direnvrc helper (runs `gen` inside `.envrc`) |
 | `flake.nix` | `nix run` / profile install; version-stamped static binary |
 | `docs/` | reference documentation (see `docs/readme.md`) |
 
 ## Build & test
 
 ```sh
+gofmt -w .  # Format code
 go build ./...
 go test ./... -skip '^(TestSynthetic|TestE2E)'  # unit tests only
-go test ./...                                   # unit + synthetic/e2e integration for the selected container CLI
+go test ./...                                   # unit + integration tests
+NDC_CONTAINER_CLI=podman go test ./...          # unit + integration tests on Podman
 nix build .#nix-direnv-cdi  # package the binary
 ```
 
-Missing integration prerequisites are test failures. Use `-skip` only when
-intentionally omitting suites.
+## Engineering & troubleshooting
 
-## Invariants to respect before editing
+The full documentation is available in `docs/`; for a ToC, see
+[docs/readme.md](docs/readme.md). Refer to the docs if you are:
 
-These are load-bearing; breaking them silently breaks the tool. Full detail in
-[docs/internals.md](docs/internals.md).
+- Analyzing the project before implementing a task
+- Stuck designing a solution
+- Cannot solve a technical problem or overcome environment constraints
+- Have to make a decision that goes against important design principles
+  established so far in the project
 
-- **The hook must always exit 0.** A non-zero `createRuntime` hook aborts the
-  container. Everything in `hook`/`nsmount` is best-effort.
-- **`nsmount` must `unshare(CLONE_FS)` before `setns(CLONE_NEWNS)`** (Go threads
-  share `CLONE_FS` → `EINVAL` otherwise), on a locked-and-discarded thread.
-  Mount-ns-only.
-- **The gate is `DIRENV_DIR`.** No `DIRENV_DIR` in the hook's env → no-op. This
-  is the authorization model, not just a guard.
-- **`gen` must not depend on `DIRENV_DIFF`** (it uses the gcroot) so it can run
-  inside `.envrc`. The **hook** reads `DIRENV_DIFF` at run time (when it's set).
-- **`0755` traversability** for the spec dir, hook binary, and `mounts.json`
-  chain under rootless podman.
+## Contributing guidelines
 
-## Verification expectation
-
-Logic changes to `hook`/`nsmount`/`cdispec` should be re-checked end-to-end
-against real container CLIs, not just unit tests — three real bugs in the
-dynamic hook were only caught by running a live container (`NDC_HOOK_LOG=<file>`
-enables hook tracing).
-
-## Full documentation
-
-→ **[docs/readme.md](docs/readme.md)**
+Before starting a task or before opening a PR, read
+[CONTRIBUTING.md](./CONTRIBUTING.md) and ensure you comply with all requirements.

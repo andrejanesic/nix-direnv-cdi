@@ -19,11 +19,44 @@ Copyright 2026 Andreja Nesic.
 
 Legal/contact email: office@andrejanesic.com.
 
+## PR checklist
+
+A change is ready to merge when all of the following hold. Each item links to
+the section with the detail.
+
+1. **Formatting is clean** — `gofmt -l .` reports nothing (CI-enforced). See
+   [Verification](#verification).
+2. **Build and vet pass** — `go build ./...` and `go vet ./...` succeed. See
+   [Verification](#verification).
+3. **All tests pass** — `go test ./...` is green (unit plus the integration,
+   e2e, and installer suites for the selected container CLI). Missing
+   prerequisites are failures, not skips — and any deliberately skipped suite is
+   named in the PR. See [Validation Policy](#validation-policy) and
+   [Test Suites](#test-suites).
+4. **Tests cover the change** — new tests are added, or existing tests updated,
+   to exercise the new or changed behavior.
+5. **The Review Checklist for each changed package is satisfied.** See
+   [Review Checklist](#review-checklist).
+6. **Project Invariants are preserved** — or the design is being changed
+   intentionally and the docs/tests move with it. See
+   [Project Invariants](#project-invariants).
+7. **Runtime support-claim changes carry fresh docker/podman e2e evidence**
+   before merging. See [Validation Policy](#validation-policy).
+8. **Docs and notes are updated** when the change touches commands, behavior,
+   support claims, or release policy — including `CHANGELOG.md` and release
+   notes for support or installer changes.
+9. **Docs tables of contents are updated** when a doc is added, renamed, or
+   removed — update every affected TOC (`docs/readme.md`, the README
+   Documentation list, and the AGENTS.md repo map).
+10. **Release preparation follows [docs/release.md](docs/release.md)** when
+    cutting a release.
+
 ## Verification
 
 Run the default checks before sending changes:
 
 ```sh
+gofmt -l .
 go build ./...
 go vet ./...
 go test ./...
@@ -124,8 +157,8 @@ release notes.
 
 ## Project Invariants
 
-These are load-bearing. Preserve them unless the design is intentionally being
-changed and the docs/tests move with it.
+Abide these rules unless the design is intentionally being changed and the
+docs/tests move with it.
 
 - The hook must always exit 0; a non-zero `createRuntime` hook aborts the
   container.
