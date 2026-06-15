@@ -43,7 +43,10 @@ func TestSyntheticDynamicMount(t *testing.T) {
 		map[string]string{"PATH": base},
 		map[string]string{"PATH": prefixDir + ":" + base, "MARKER": "synthetic-marker"},
 	)
-	devshellEnv := []string{"DIRENV_DIR=-" + work, "DIRENV_DIFF=" + diff}
+	// The fake "closure" lives under work, not /nix/store, so point the hook's
+	// closure-path allowlist there via NIX_STORE_DIR (the same override real
+	// relocated stores use).
+	devshellEnv := []string{"DIRENV_DIR=-" + work, "DIRENV_DIFF=" + diff, "NIX_STORE_DIR=" + work}
 
 	specDir := writeSpecForCLI(t, cli, bin)
 	device := cli.deviceArgs(specDir)

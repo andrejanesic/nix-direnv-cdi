@@ -63,9 +63,16 @@ func TestE2EPodmanInstallRegistrationSmoke(t *testing.T) {
 		t.Fatalf("podman drop-in not written: %v", err)
 	}
 
+	// This is a registration/resolution smoke test, not a dev-shell-injection
+	// test: it only asserts the installed device resolves and the container
+	// runs. Scrub DIRENV_DIR/DIRENV_DIFF so the hook gate stays closed — without
+	// this the test is non-hermetic and fails when `go test` is run from inside a
+	// loaded dev-shell (the hook would wrap the entrypoint against a closure this
+	// test never generated). Injection itself is covered by TestE2EFlakeDevShell.
 	ctx, cancel = context.WithTimeout(context.Background(), cmdTimeout)
 	defer cancel()
-	out, err = run(ctx, runEnv, podman, "run", "--rm", "--device", cdispec.Ref, busyboxImage, "true")
+	out, err = run(ctx, runEnv, "env", "-u", "DIRENV_DIR", "-u", "DIRENV_DIFF",
+		podman, "run", "--rm", "--device", cdispec.Ref, busyboxImage, "true")
 	if err != nil {
 		t.Fatalf("podman did not resolve installed CDI device: %v\n%s", err, out)
 	}

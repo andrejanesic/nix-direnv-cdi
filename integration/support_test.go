@@ -146,7 +146,7 @@ func (c containerCLI) direnvPassthroughArgs() []string {
 	if c.name != "docker" {
 		return nil
 	}
-	return []string{"--env", "DIRENV_DIR", "--env", "DIRENV_DIFF"}
+	return []string{"--env", "DIRENV_DIR", "--env", "DIRENV_DIFF", "--env", "NIX_STORE_DIR"}
 }
 
 // writeExecScript writes content to path as an executable script (0755),
