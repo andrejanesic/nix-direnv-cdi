@@ -99,6 +99,19 @@ jobs:
           VERSION: ${{ github.ref_name }}
         run: |
           set -euo pipefail
+          # Extract just this version's section from CHANGELOG.md (between
+          # "## <tag>" and the next "## " heading). Fall back to GitHub's
+          # auto-generated notes if the tag has no matching section.
+          awk -v ver="## ${VERSION}" '
+            $0 == ver {flag=1; next}
+            /^## / && flag {flag=0}
+            flag {print}
+          ' CHANGELOG.md > RELEASE_NOTES.md
+          if [ -s RELEASE_NOTES.md ]; then
+            notes_args=(--notes-file RELEASE_NOTES.md)
+          else
+            notes_args=(--generate-notes)
+          fi
           gh release view "${VERSION}" >/dev/null 2>&1 || \
-            gh release create "${VERSION}" --title "${VERSION}" --notes-file CHANGELOG.md
+            gh release create "${VERSION}" --title "${VERSION}" "${notes_args[@]}"
           gh release upload "${VERSION}" dist/* --clobber
