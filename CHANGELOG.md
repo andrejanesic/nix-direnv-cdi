@@ -8,10 +8,51 @@ and known issues explicitly.
 
 ## v0.1.0
 
+First public release. `nix-direnv-cdi` exposes a project's nix-direnv dev-shell
+inside any OCI container (podman, docker) through a single generic CDI device.
+The device carries no project data — only a `createRuntime` hook that, at
+`podman run --device …`, bind-mounts the dev-shell's `/nix/store` closure into
+the container and wraps the entrypoint for an additive `PATH` and dev-shell
+environment. One device serves every project; the launching shell decides which
+dev-shell at run time.
+
 ### Added
 
+- **Generic CDI device model.** A single, project-independent device
+  (`nix-direnv-cdi.org/env=current`) works for every project — no per-project
+  fingerprint or regeneration of the device spec.
+- **`gen`.** Computes the dev-shell closure from the direnv gcroot
+  (`nix-store -qR`) and writes it to `<project>/.direnv/cdi/mounts.json`, the
+  data the runtime hook bind-mounts. Safe to run inside `.envrc` right after
+  `use flake`.
+- **`hook`.** The `createRuntime` hook: gates on the loaded direnv environment,
+  enters the container's mount namespace to inject the closure as read-only bind
+  mounts (rootless, via `setns` in a child process), then wraps the entrypoint
+  for additive `PATH` + dev-shell env. Best-effort by contract — it never breaks
+  the container, even on panic.
+- **`install` / `uninstall`.** One-time registration of the generic device dir
+  with podman and docker (backup-then-auto), and clean rollback.
+- **`version`.** Reports version, commit, and build date.
+- **`use cdi` direnvrc helper** (`contrib/use_cdi.sh`) that runs `gen` from
+  within `.envrc`.
+- **Nix packaging.** `nix run` / `nix profile install` of a version-stamped
+  static binary via `flake.nix`; declarative install via `environment.etc` /
+  `xdg.configFile` on NixOS.
+- **Documentation** under [docs/](docs/readme.md): usage guide, architecture,
+  mechanisms, design decisions, security model, limitations and runtime support
+  matrix, and the release process.
+- **Worked example** ([example/](example/readme.md)): a coding agent running in
+  a container via the device.
+- **Integration tests:** a nix-free synthetic tier and a nix-gated real-flake
+  end-to-end tier, runnable against rootless or rootful podman.
 - Release and distribution policy covering versioning, artifacts, verification,
   upgrades, and rollback.
+
+### Runtime support
+
+- Rootless and rootful podman, and docker. Bare rootless `runc` (no higher-level
+  runtime) is explicitly out of scope. See
+  [docs/limitations.md](docs/limitations.md) for the full matrix.
 
 ### Security
 
