@@ -1,6 +1,10 @@
 {
   description = "CDI for secure Nix direnv passthrough from host to container";
 
+  # Tracks nixos-unstable deliberately: the build needs a recent Go toolchain
+  # (see `go` in go.mod) that the stable channels lag behind. The exact revision
+  # is pinned in flake.lock for reproducibility; run `nix flake update`
+  # intentionally (and re-review) rather than relying on the floating branch.
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
 
   outputs = { self, nixpkgs }:
