@@ -6,14 +6,30 @@ a real trap; several were only caught by running against a live runtime. (For
 user-facing limitations and runtime support, see
 [limitations.md](limitations.md).)
 
+## `setns(CLONE_NEWNS)` runs in a child process, not the hook
+
+The namespace switch and bind mounts run in a **short-lived child process** that
+the hook re-execs (`nix-direnv-cdi __nsmount <pid> <rootfs>`, closure on stdin —
+see `nsmount.BindAll`/`RunChild`), not on a goroutine inside the hook itself.
+`setns(CLONE_NEWNS)` permanently taints the calling OS thread, and the original
+design left that thread to be destroyed by the Go runtime while the hook kept
+running. That per-thread teardown after `setns` is kernel/Go-version-fragile: on
+some runtimes (observed on a GitHub Actions rootless-podman runner) it kills the
+hook with a signal **no `recover()` can catch**, and crun then fails the whole
+container (`error executing hook … (exit code: 1)`). Isolating the work in a
+child means any such fault dies with the child (best-effort, ignored by the
+parent), while the mounts — created in the *container's* mount namespace — persist
+after the child exits, because the container's own processes keep that namespace
+alive.
+
 ## `CLONE_FS` → `setns(CLONE_NEWNS)` EINVAL (the Go trap)
 
 All Go runtime threads share `CLONE_FS` (cwd/root/umask) state, and the kernel
 refuses `setns(CLONE_NEWNS)` with **`EINVAL`** while the caller shares `CLONE_FS`
-with other threads. `nsmount` therefore calls `unix.Unshare(unix.CLONE_FS)`
-**first**, on a `runtime.LockOSThread()`'d goroutine that is then discarded
-(returns without unlocking → the tainted thread dies), keeping every other
-thread in the host namespace. Without the `unshare`, the mount silently fails.
+with other threads. The mount child therefore calls `unix.Unshare(unix.CLONE_FS)`
+**first**, on a `runtime.LockOSThread()`'d goroutine (the child exits right
+after, so the tainted thread is reclaimed by ordinary process teardown). Without
+the `unshare`, the mount silently fails.
 
 ## Host-side mounts don't propagate; you must enter the container's mount ns
 

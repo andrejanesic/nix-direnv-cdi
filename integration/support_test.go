@@ -203,23 +203,44 @@ func encodeDirenvDiff(t *testing.T, prev, next map[string]string) string {
 
 // dumpHookLog logs the contents of the createRuntime hook's debug log (written
 // when NDC_HOOK_LOG is set) so a failing run reveals where the hook stopped.
-// Under rootless podman the hook runs as the invoking user, so the log is
-// readable here; an unreadable/missing log is reported, not fatal.
-func dumpHookLog(t *testing.T, path string) {
+// Under rootless podman the hook runs as a mapped sub-uid and the log is owned
+// by that uid (mode 0600), so a direct read fails; fall back to reading it
+// inside podman's user namespace via `podman unshare cat`. An unreadable or
+// missing log is reported, not fatal.
+func dumpHookLog(t *testing.T, cli containerCLI, path string) {
 	t.Helper()
 	if path == "" {
 		return
 	}
-	b, err := os.ReadFile(path)
-	if err != nil {
-		t.Logf("hook log %s unreadable: %v", path, err)
+	if b, err := os.ReadFile(path); err == nil {
+		logBlob(t, path, "direct", b)
 		return
 	}
+	if cli.name == "podman" {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		out, err := run(ctx, nil, cli.path, "unshare", "cat", path)
+		if err == nil {
+			logBlob(t, path, "podman unshare", []byte(out))
+			return
+		}
+		// Surface whether the file exists at all (and its owner/mode).
+		lsCtx, lsCancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer lsCancel()
+		ls, _ := run(lsCtx, nil, cli.path, "unshare", "ls", "-la", filepath.Dir(path))
+		t.Logf("hook log %s unreadable via unshare: %v\ndir listing:\n%s", path, err, ls)
+		return
+	}
+	t.Logf("hook log %s unreadable", path)
+}
+
+func logBlob(t *testing.T, path, via string, b []byte) {
+	t.Helper()
 	if len(b) == 0 {
-		t.Logf("hook log %s is empty (hook produced no diagnostics)", path)
+		t.Logf("hook log %s (%s) is empty (hook produced no diagnostics)", path, via)
 		return
 	}
-	t.Logf("hook log %s:\n%s", path, b)
+	t.Logf("hook log %s (%s):\n%s", path, via, b)
 }
 
 // run executes name with args and extraEnv (appended to os.Environ), returning

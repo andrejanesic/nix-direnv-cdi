@@ -17,9 +17,7 @@ jobs:
   analyze:
     runs-on: ubuntu-latest
     permissions:
-      actions: read # read workflow run metadata (fingerprints/telemetry)
       contents: read
-      security-events: write # upload results to the Security tab
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
 
@@ -39,3 +37,23 @@ jobs:
         uses: github/codeql-action/analyze@dd903d2e4f5405488e5ef1422510ee31c8b32357 # v3.36.2
         with:
           category: "/language:go"
+          # No GHAS on this repo, so skip the Security-tab upload and gate on
+          # the SARIF locally instead (see the next step).
+          upload: false
+          output: codeql-results
+
+      - name: Fail on any CodeQL findings
+        run: |
+          # Emit each result as a GitHub error annotation, then fail the job
+          # if the SARIF holds any findings. The SARIF itself is discarded.
+          jq -r '
+            .runs[].results[]
+            | "::error file=\(.locations[0].physicalLocation.artifactLocation.uri),line=\(.locations[0].physicalLocation.region.startLine)::\(.ruleId): \(.message.text)"
+          ' codeql-results/*.sarif
+
+          count=$(jq -s '[.[].runs[].results[]] | length' codeql-results/*.sarif)
+          echo "CodeQL findings: $count"
+          if [ "$count" -gt 0 ]; then
+            echo "::error::CodeQL found $count issue(s); failing the job."
+            exit 1
+          fi

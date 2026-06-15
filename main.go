@@ -15,6 +15,7 @@ import (
 	"github.com/andrejanesic/nix-direnv-cdi/internal/devshell"
 	"github.com/andrejanesic/nix-direnv-cdi/internal/hook"
 	"github.com/andrejanesic/nix-direnv-cdi/internal/install"
+	"github.com/andrejanesic/nix-direnv-cdi/internal/nsmount"
 )
 
 // These are overridden at build time via -ldflags. Release builds set version
@@ -53,6 +54,15 @@ func main() {
 		// Best-effort by contract: a hook must never break the container, so
 		// cmdHook reports errors but the process always exits 0.
 		cmdHook(args)
+	case nsmount.ChildSubcommand:
+		// Hidden: the mount child re-exec'd by the hook (not user-facing). It
+		// enters the container mount ns and binds the closure, then exits. A
+		// non-zero exit is surfaced to the parent hook, which treats mount
+		// injection as best-effort.
+		if err := nsmount.RunChild(args, os.Stdin); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
 	case "install":
 		exitOnErr(cmdInstall(args))
 	case "uninstall":

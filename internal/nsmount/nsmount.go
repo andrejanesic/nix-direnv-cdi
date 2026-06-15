@@ -7,25 +7,41 @@
 // multithreaded Go process and suffices whenever the hook already holds
 // CAP_SYS_ADMIN in the user namespace owning that mount ns. On EPERM, BindAll
 // returns a descriptive error and the caller (the hook) degrades gracefully.
+//
+// The namespace switch and bind mounts run in a short-lived CHILD process (the
+// hook re-execs itself with ChildSubcommand), not on a goroutine inside the
+// hook. setns(CLONE_NEWNS) taints the calling OS thread, and having the Go
+// runtime destroy that tainted thread while the hook keeps running is
+// kernel/version-fragile — a fault there can kill the whole hook with a signal
+// that no recover() catches, which fails the container. Isolating it in a child
+// means any such fault dies with the child (best-effort, ignored), while the
+// mounts — created in the container's mount namespace — persist after the child
+// exits because the container's own processes keep that namespace alive.
 package nsmount
 
 import (
+	"bytes"
 	"fmt"
+	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
+	"strings"
 
 	"golang.org/x/sys/unix"
 )
 
-// BindAll enters pid's mount namespace and bind-mounts each path in closure
-// read-only onto rootfs+path inside the container. Source paths (host
+// ChildSubcommand is the hidden argv[1] the hook uses to re-exec itself as the
+// mount child. main dispatches it to RunChild.
+const ChildSubcommand = "__nsmount"
+
+// BindAll bind-mounts each path in closure read-only onto rootfs+path inside the
+// container at pid by re-execing this binary as a short-lived mount child (see
+// the package doc for why a child rather than a goroutine). Source paths (host
 // /nix/store/...) are reachable from the container mount ns before pivot_root,
 // and mounts created under rootfs survive pivot_root, appearing at /path.
-//
-// The namespace switch runs on a dedicated locked OS thread that is destroyed
-// afterward (the goroutine returns without unlocking), so the caller's threads
-// stay in the host namespace.
 func BindAll(pid int, rootfs string, closure []string) error {
 	if pid <= 0 {
 		return fmt.Errorf("nsmount: invalid pid %d", pid)
@@ -33,20 +49,60 @@ func BindAll(pid int, rootfs string, closure []string) error {
 	if rootfs == "" {
 		return fmt.Errorf("nsmount: empty rootfs")
 	}
+	self, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("nsmount: locate self: %w", err)
+	}
+	cmd := exec.Command(self, ChildSubcommand, strconv.Itoa(pid), rootfs)
+	// Closure paths go over stdin (newline-separated) to avoid ARG_MAX limits
+	// on large closures.
+	cmd.Stdin = strings.NewReader(strings.Join(closure, "\n"))
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		if msg := strings.TrimSpace(stderr.String()); msg != "" {
+			return fmt.Errorf("nsmount child: %w: %s", err, msg)
+		}
+		return fmt.Errorf("nsmount child: %w", err)
+	}
+	return nil
+}
+
+// RunChild is the entry point for the re-exec'd mount child: it reads pid and
+// rootfs from args and the newline-separated closure from stdin, then performs
+// the bind mounts on a locked, fs-detached thread. The caller (main) maps a
+// non-nil error to a non-zero exit and then exits the process, so the tainted
+// thread is reclaimed by ordinary process teardown rather than Go's per-thread
+// destruction.
+func RunChild(args []string, stdin io.Reader) error {
+	if len(args) != 2 {
+		return fmt.Errorf("nsmount child: usage: %s <pid> <rootfs>", ChildSubcommand)
+	}
+	pid, err := strconv.Atoi(args[0])
+	if err != nil {
+		return fmt.Errorf("nsmount child: bad pid %q: %w", args[0], err)
+	}
+	rootfs := args[1]
+	data, err := io.ReadAll(stdin)
+	if err != nil {
+		return fmt.Errorf("nsmount child: read closure: %w", err)
+	}
+	var closure []string
+	for _, line := range strings.Split(string(data), "\n") {
+		if line != "" {
+			closure = append(closure, line)
+		}
+	}
+
 	errc := make(chan error, 1)
 	go func() {
-		// A panic here runs on this dedicated goroutine, so cmdHook's recover
-		// (a different goroutine) can't catch it; an uncaught panic would crash
-		// the whole hook process and fail the container. Convert it to an error
-		// so mount injection stays best-effort.
 		defer func() {
 			if r := recover(); r != nil {
 				errc <- fmt.Errorf("nsmount: panic: %v", r)
 			}
 		}()
-		// Intentionally NOT unlocked: setns taints this thread, so we let the
-		// goroutine return without unlocking and the Go runtime destroys the
-		// thread — keeping every other thread in the host namespace.
+		// Locked and never unlocked: setns taints this thread. The child exits
+		// right after, so the thread is torn down with the process.
 		runtime.LockOSThread()
 		errc <- bindAllOnThread(pid, rootfs, closure)
 	}()
