@@ -201,6 +201,27 @@ func encodeDirenvDiff(t *testing.T, prev, next map[string]string) string {
 	return base64.URLEncoding.EncodeToString(buf.Bytes())
 }
 
+// dumpHookLog logs the contents of the createRuntime hook's debug log (written
+// when NDC_HOOK_LOG is set) so a failing run reveals where the hook stopped.
+// Under rootless podman the hook runs as the invoking user, so the log is
+// readable here; an unreadable/missing log is reported, not fatal.
+func dumpHookLog(t *testing.T, path string) {
+	t.Helper()
+	if path == "" {
+		return
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Logf("hook log %s unreadable: %v", path, err)
+		return
+	}
+	if len(b) == 0 {
+		t.Logf("hook log %s is empty (hook produced no diagnostics)", path)
+		return
+	}
+	t.Logf("hook log %s:\n%s", path, b)
+}
+
 // run executes name with args and extraEnv (appended to os.Environ), returning
 // combined output. ctx bounds the runtime.
 func run(ctx context.Context, extraEnv []string, name string, args ...string) (string, error) {

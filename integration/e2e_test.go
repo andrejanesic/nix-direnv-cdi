@@ -87,6 +87,12 @@ func TestE2EFlakeDevShell(t *testing.T) {
 	// The generic device, hook = our built binary.
 	writeSpecForCLI(t, cli, bin)
 
+	// crun swallows the createRuntime hook's stderr, so point the hook at a log
+	// file (best-effort debug knob) and dump it when a run fails — this is the
+	// only window into why the hook misbehaved on a given runtime/host.
+	hookLog := filepath.Join(work, "hook.log")
+	t.Setenv("NDC_HOOK_LOG", hookLog)
+
 	t.Run("hello_propagates_and_path_additive", func(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), cmdTimeout)
 		defer cancel()
@@ -96,6 +102,7 @@ func TestE2EFlakeDevShell(t *testing.T) {
 		args = append(args, busyboxImage, "sh", "-c", "hello; echo \"PATH=$PATH\"")
 		out, err := run(ctx, direnvEnv, "direnv", args...)
 		if err != nil {
+			dumpHookLog(t, hookLog)
 			t.Fatalf("%s run: %v\n%s", cli.name, err, out)
 		}
 		if !strings.Contains(out, "Hello, world!") {
@@ -115,6 +122,7 @@ func TestE2EFlakeDevShell(t *testing.T) {
 		args = append(args, busyboxImage, "sh", "-c", "ls /bin/busybox >/dev/null && echo BASE_OK")
 		out, err := run(ctx, direnvEnv, "direnv", args...)
 		if err != nil {
+			dumpHookLog(t, hookLog)
 			t.Fatalf("%s run: %v\n%s", cli.name, err, out)
 		}
 		if !strings.Contains(out, "BASE_OK") {

@@ -35,6 +35,15 @@ func BindAll(pid int, rootfs string, closure []string) error {
 	}
 	errc := make(chan error, 1)
 	go func() {
+		// A panic here runs on this dedicated goroutine, so cmdHook's recover
+		// (a different goroutine) can't catch it; an uncaught panic would crash
+		// the whole hook process and fail the container. Convert it to an error
+		// so mount injection stays best-effort.
+		defer func() {
+			if r := recover(); r != nil {
+				errc <- fmt.Errorf("nsmount: panic: %v", r)
+			}
+		}()
 		// Intentionally NOT unlocked: setns taints this thread, so we let the
 		// goroutine return without unlocking and the Go runtime destroys the
 		// thread — keeping every other thread in the host namespace.

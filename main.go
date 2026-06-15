@@ -141,10 +141,18 @@ func sharedSpecDir() (string, error) {
 	return filepath.Join(home, ".config", "cdi"), nil
 }
 
-// cmdHook runs the createRuntime hook. It is best-effort: any error is reported
-// to stderr but the process still exits 0, so a failure never breaks the
-// container.
+// cmdHook runs the createRuntime hook. It is best-effort: any error — including
+// a panic — is reported to stderr but the process still exits 0, so a failure
+// never breaks the container. The panic guard matters because crun fails the
+// container whenever a createRuntime hook exits non-zero (a Go panic would
+// otherwise exit 2), so an unexpected fault in mount injection or the
+// entrypoint wrap must degrade gracefully rather than abort the run.
 func cmdHook(args []string) {
+	defer func() {
+		if r := recover(); r != nil {
+			fmt.Fprintln(os.Stderr, "nix-direnv-cdi hook (panic, ignored):", r)
+		}
+	}()
 	fs := flag.NewFlagSet("hook", flag.ContinueOnError)
 	if err := fs.Parse(args); err != nil {
 		fmt.Fprintln(os.Stderr, "nix-direnv-cdi hook:", err)

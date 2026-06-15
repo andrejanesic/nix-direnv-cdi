@@ -73,9 +73,19 @@ func resolveRootfs(spec *oci.Spec, bundle string) string {
 // in a loaded dev-shell is the authorization), then injects the closure mounts
 // and wraps the entrypoint for additive PATH + dev-shell env. Best-effort: a
 // mount failure is logged but never blocks the wrap or breaks the container.
-func run(state *oci.State, spec *oci.Spec, rootfs string, getenv getenvFunc, mount mountFunc) error {
+func run(state *oci.State, spec *oci.Spec, rootfs string, getenv getenvFunc, mount mountFunc) (rerr error) {
 	runtimeGetenv := getenvWithProcessEnv(getenv, spec)
 	dbg := debugLog(runtimeGetenv)
+
+	// A createRuntime hook must never break the container, so capture any panic
+	// into the debug log (the only window crun leaves open) and surface it as a
+	// returned error the caller already treats as best-effort.
+	defer func() {
+		if r := recover(); r != nil {
+			dbg("PANIC: %v", r)
+			rerr = fmt.Errorf("hook panic: %v", r)
+		}
+	}()
 
 	dirRaw, ok := runtimeGetenv("DIRENV_DIR")
 	if !ok || dirRaw == "" {
