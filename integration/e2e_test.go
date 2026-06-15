@@ -113,6 +113,7 @@ func TestE2EFlakeDevShell(t *testing.T) {
 		out, err := run(ctx, direnvEnv, "direnv", args...)
 		if err != nil {
 			dumpHookLog(t, cli, hookLog)
+			dumpTrace(t, bin)
 			t.Fatalf("%s run: %v\n%s", cli.name, err, out)
 		}
 		if !strings.Contains(out, "Hello, world!") {
@@ -134,6 +135,7 @@ func TestE2EFlakeDevShell(t *testing.T) {
 		out, err := run(ctx, direnvEnv, "direnv", args...)
 		if err != nil {
 			dumpHookLog(t, cli, hookLog)
+			dumpTrace(t, bin)
 			t.Fatalf("%s run: %v\n%s", cli.name, err, out)
 		}
 		if !strings.Contains(out, "BASE_OK") {

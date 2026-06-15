@@ -31,6 +31,8 @@ import (
 	"strings"
 
 	"golang.org/x/sys/unix"
+
+	"github.com/andrejanesic/nix-direnv-cdi/internal/trace"
 )
 
 // ChildSubcommand is the hidden argv[1] the hook uses to re-exec itself as the
@@ -53,6 +55,7 @@ func BindAll(pid int, rootfs string, closure []string) error {
 	if err != nil {
 		return fmt.Errorf("nsmount: locate self: %w", err)
 	}
+	trace.Mark("nsmount.BindAll: re-exec child self=%s pid=%d", self, pid)
 	cmd := exec.Command(self, ChildSubcommand, strconv.Itoa(pid), rootfs)
 	// Closure paths go over stdin (newline-separated) to avoid ARG_MAX limits
 	// on large closures.
@@ -94,6 +97,7 @@ func RunChild(args []string, stdin io.Reader) error {
 		}
 	}
 
+	trace.Mark("nsmount.RunChild: entry pid=%d rootfs=%s closure=%d", pid, rootfs, len(closure))
 	errc := make(chan error, 1)
 	go func() {
 		defer func() {
@@ -104,9 +108,12 @@ func RunChild(args []string, stdin io.Reader) error {
 		// Locked and never unlocked: setns taints this thread. The child exits
 		// right after, so the thread is torn down with the process.
 		runtime.LockOSThread()
+		trace.Mark("nsmount.RunChild: locked thread, binding")
 		errc <- bindAllOnThread(pid, rootfs, closure)
 	}()
-	return <-errc
+	res := <-errc
+	trace.Mark("nsmount.RunChild: done err=%v", res)
+	return res
 }
 
 func bindAllOnThread(pid int, rootfs string, closure []string) error {

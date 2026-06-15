@@ -16,6 +16,7 @@ import (
 	"github.com/andrejanesic/nix-direnv-cdi/internal/hook"
 	"github.com/andrejanesic/nix-direnv-cdi/internal/install"
 	"github.com/andrejanesic/nix-direnv-cdi/internal/nsmount"
+	"github.com/andrejanesic/nix-direnv-cdi/internal/trace"
 )
 
 // These are overridden at build time via -ldflags. Release builds set version
@@ -41,6 +42,7 @@ Commands:
 Run "nix-direnv-cdi <command> -h" for command-specific flags.`
 
 func main() {
+	trace.Mark("main: entry argv=%v", os.Args) // diagnostic: env-independent proof of life
 	if len(os.Args) < 2 {
 		fmt.Fprintln(os.Stderr, usage)
 		os.Exit(2)
@@ -176,6 +178,7 @@ func sharedSpecDir() (string, error) {
 // otherwise exit 2), so an unexpected fault in mount injection or the
 // entrypoint wrap must degrade gracefully rather than abort the run.
 func cmdHook(args []string) {
+	trace.Mark("cmdHook: entry")     // diagnostic: env-independent
 	hookBreadcrumb("cmdHook: entry") // diagnostic: proves the binary ran our code
 	defer func() {
 		if r := recover(); r != nil {

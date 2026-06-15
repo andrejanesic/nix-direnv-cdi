@@ -94,7 +94,22 @@ func build(t *testing.T) string {
 		t.Fatalf("go build: %v\n%s", err, out)
 	}
 	chmodTraversable(t, bin)
+	// The hook writes an env-independent breadcrumb to <bin>.ndctrace; widen the
+	// bin dir so a sub-uid hook can create it (chmodTraversable left it 0755).
+	_ = os.Chmod(dir, 0o777)
 	return bin
+}
+
+// dumpTrace logs the env-independent hook breadcrumb file (<bin>.ndctrace), the
+// channel that survives even when NDC_HOOK_LOG does not reach the hook.
+func dumpTrace(t *testing.T, binPath string) {
+	t.Helper()
+	p := binPath + ".ndctrace"
+	if b, err := os.ReadFile(p); err == nil && len(b) > 0 {
+		t.Logf("hook trace %s:\n%s", p, b)
+		return
+	}
+	t.Logf("hook trace %s missing/empty (hook never ran our code, or could not write it)", p)
 }
 
 // chmodTraversable widens path and every ancestor to >=0755 so the rootless
