@@ -4,10 +4,7 @@
     "config:recommended",
     "helpers:pinGitHubActionDigests"
   ],
-  "schedule": [
-    "before 9am on monday"
-  ],
-  "prConcurrentLimit": 5,
+  "enabledManagers": ["gomod", "github-actions"],
   "packageRules": [
     {
       "matchManagers": ["gomod"],
