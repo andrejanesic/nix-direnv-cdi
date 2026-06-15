@@ -1,18 +1,70 @@
 # Security model
 
-## The gate *is* the authorization
+## The gate: `DIRENV_DIR` activates the hook
 
 The hook acts only when `DIRENV_DIR` is present in the environment it inherits
 from the container runtime — i.e. when you launched the container **from inside
-the project's loaded dev-shell**. Being in that shell means you ran
-`direnv allow` and entered it; that approval *is* the authorization to expose the
-dev-shell.
+the project's loaded dev-shell**. Run the device from anywhere else (a plain
+shell, a daemon, a different project) and the hook **no-ops**: nothing is
+mounted, `PATH`/env are untouched, and the container runs exactly as if the
+device weren't attached.
 
-Run the device from anywhere else (a plain shell, a daemon, a different project)
-and the hook **no-ops**: nothing is mounted, `PATH`/env are untouched, and the
-container runs exactly as if the device weren't attached. We deliberately do not
-make a dev-shell available to a context that hasn't entered (and thus approved)
-it.
+Treat `DIRENV_DIR` as an **activation switch, not an authorization boundary**. It
+decides *whether* the hook runs and *which* project's `mounts.json` it reads — it
+does not, on its own, prove the caller is trusted. For daemon-driven Docker you
+may even pass `DIRENV_DIR`/`DIRENV_DIFF` explicitly with `--env` (see below), so
+any caller who can set an environment variable on the run can open the gate. What
+actually bounds exposure is that the hook only ever acts **as the launching
+user, on that user's own files, into that user's own container**, and that it
+refuses to bind-mount anything outside `/nix/store`. The trust assumptions are
+spelled out in the threat model below.
+
+## Threat model
+
+`nix-direnv-cdi` runs entirely as the user who launches the container, on that
+user's own files, into that user's own container. It holds no privilege the
+launcher doesn't already have, and it never writes secrets to disk (see below).
+
+**Trusted — you rely on these being honest:**
+
+- **You**, the launching user, and your login environment.
+- **The project directory** and its `.direnv/`, in particular
+  `.direnv/cdi/mounts.json` (the list of `/nix/store` paths the hook bind-mounts).
+- **The `.envrc`** you ran `direnv allow` on — `direnv allow` already runs
+  arbitrary code as you, so only allow `.envrc` files you trust.
+- **The Nix store** the closure resolves to.
+
+**Not relied upon:**
+
+- **Unrelated containers** — the hook runs only on containers carrying the CDI
+  device via `--device`.
+- **The container image / entrypoint** — a hostile image cannot make the hook
+  exceed the launcher's own privileges.
+- **`mounts.json` contents** — the hook refuses any entry that is not a clean,
+  absolute path under `/nix/store` (or `$NIX_STORE_DIR` for a relocated store),
+  so a corrupted or tampered `mounts.json` cannot redirect the bind-mount at an
+  arbitrary host path.
+
+On a **single-user workstation** every trusted item is yours, so exposure is
+self-to-self: the hook can only do what you could already do with `-v`/`--env`.
+
+## Shared hosts and multi-user systems
+
+The trust assumptions above are really about *who can write the project directory
+and set the launch environment*. On a shared or multi-user host:
+
+- **Do not launch from a group-/world-writable project directory.** If another
+  user can write `.direnv/cdi/mounts.json` they choose which `/nix/store` paths
+  are mounted into *your* container — and although those paths are validated to
+  be store paths, a store path they populated can still carry binaries that
+  shadow tools on your container `PATH`. Keep `.direnv` private: `chmod 0700 .direnv`.
+- **Treat `DIRENV_DIR`/`DIRENV_DIFF` as inputs, not credentials.** Anyone who can
+  set them on a run can open the gate; that is by design for Docker. The
+  protections are the `/nix/store` validation and the launcher-only privilege.
+- **`mounts.json` is world-readable (`0644`)**, so it discloses your closure
+  structure (not secrets) to other local users.
+- **Debug logging (`NDC_HOOK_LOG`)** should point to a private path; it is
+  created `0600` and does not follow symlinks.
 
 ## Opt-in, no blast radius
 
@@ -68,8 +120,17 @@ escalate; the worst case is the dev-shell simply isn't injected.
 the dev-shell loaded. This is a usage note, but also a property: without the
 approved environment, nothing is exposed.
 
+## Verifying releases
+
+Release binaries are checksummed, cosign-signed (keyless), and carry GitHub
+build-provenance attestations. Verify them before installing — see
+[release.md → Verify artifacts](release.md#verify-artifacts) for the exact
+`sha256sum -c`, `gh attestation verify`, and `cosign verify-blob` commands and
+the expected workflow identity / OIDC issuer.
+
 ## See also
 
 - [limitations.md](limitations.md) — limitations, runtime support, and non-goals.
 - [internals.md](internals.md) — the low-level behaviours behind the above (e.g.
   why the read-only remount is best-effort under rootless).
+- [release.md](release.md) — release channels and artifact verification.

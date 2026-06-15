@@ -40,8 +40,9 @@ dev-shell isn't there):
 - **Is the device found?** Run `nix-direnv-cdi install` once. Podman reads the
   user shared CDI dir registered by the drop-in; Docker reads
   `/etc/cdi/nix-direnv.json`.
-- **Still stuck?** Set `NDC_HOOK_LOG=/tmp/ndc-hook.log` in the launching
-  environment and read the hook's trace:
+- **Still stuck?** Set `NDC_HOOK_LOG` to a private file in the launching
+  environment (e.g. `"$XDG_RUNTIME_DIR/ndc-hook.log"`; it is created `0600` and
+  will not follow a symlink) and read the hook's trace:
   - `gate closed` means `DIRENV_DIR` was not visible to the hook.
   - a `mounts.json` read error means `gen` has not run, the file is stale, or
     the path is not traversable by the hook.
@@ -68,6 +69,10 @@ dev-shell isn't there):
   but isn't part of the mounted closure, so tools there won't resolve in the
   container. The common case (store `bin` dirs) is covered.
 - **No workdir mount.** Project sources aren't mounted; add `-v $PWD:$PWD`.
+- **Relocated Nix store.** The hook only bind-mounts closure paths under
+  `/nix/store`. If your store lives elsewhere, set `NIX_STORE_DIR` in the
+  launching environment (and pass it through with `--env NIX_STORE_DIR` on
+  Docker) so the hook accepts those paths.
 - **`sudo` strips the gate env** → device inert; use `sudo -E`. See the
   Troubleshooting note above and [security.md](security.md) for why.
 - **Other OCI launch paths are unverified.** The design is a standard CDI

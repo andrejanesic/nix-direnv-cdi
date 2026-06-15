@@ -27,9 +27,13 @@ concerns.
 mount namespace and bind-mounts a Nix store closure into the container. A few
 properties of this model that are relevant to security:
 
-- **Gate is `DIRENV_DIR`.** The hook no-ops when `DIRENV_DIR` is absent from
-  the environment it inherits. Exposure requires an active, `direnv allow`-ed
-  dev-shell in the launching shell.
+- **Gate is `DIRENV_DIR` (an activation switch).** The hook no-ops when
+  `DIRENV_DIR` is absent from the environment it inherits. It decides *whether*
+  the hook runs and *which* project's closure it reads — it is not by itself a
+  trust boundary (a caller who can set `--env` can open it). What bounds exposure
+  is that the hook acts only as the launcher, on the launcher's own files, and
+  refuses to mount anything outside `/nix/store`. See the
+  [threat model](docs/security.md#threat-model).
 - **Opt-in attachment.** The hook runs only on containers that explicitly carry
   the CDI device via `--device`. Unrelated containers are unaffected.
 - **Surgical closure only.** Only the project's dev-shell store closure is
@@ -40,6 +44,10 @@ properties of this model that are relevant to security:
   the worst outcome is the dev-shell is not injected.
 - **Privilege follows the launcher.** Under rootless Podman the hook runs as
   your mapped subuid inside the user namespace. Under rootful it runs as root.
+- **Multi-user hosts.** The hook acts only as the launcher, on the launcher's
+  files; keep the project's `.direnv` private (`chmod 0700 .direnv`) so other
+  local users can't influence what is mounted. See
+  [docs/security.md](docs/security.md#shared-hosts-and-multi-user-systems).
 
 See [docs/security.md](docs/security.md) for a full treatment of the security
 model, privilege boundaries, and known limitations.
