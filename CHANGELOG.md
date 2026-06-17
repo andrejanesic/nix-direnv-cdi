@@ -6,7 +6,7 @@ This project follows SemVer for tagged releases. Release notes should call out
 runtime support changes, installer behavior changes, security-relevant changes,
 and known issues explicitly.
 
-## Unreleased
+## v0.2.0
 
 ### Fixed
 

@@ -123,7 +123,7 @@ For home-manager (rootless podman) the spec goes to `~/.config/cdi` and needs a
 ```sh
 nix run github:andrejanesic/nix-direnv-cdi -- install
 # or pin a release:
-nix profile install github:andrejanesic/nix-direnv-cdi/v0.1.0
+nix profile install github:andrejanesic/nix-direnv-cdi/v0.2.0
 nix-direnv-cdi install
 ```
 

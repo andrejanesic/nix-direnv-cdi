@@ -152,20 +152,20 @@ register the device on this machine.
 **Nix profile (pinned):**
 
 ```sh
-nix profile install github:andrejanesic/nix-direnv-cdi/v0.1.0
+nix profile install github:andrejanesic/nix-direnv-cdi/v0.2.0
 nix-direnv-cdi install
 ```
 
 **One-shot, without adding to a profile:**
 
 ```sh
-nix run github:andrejanesic/nix-direnv-cdi/v0.1.0 -- install
+nix run github:andrejanesic/nix-direnv-cdi/v0.2.0 -- install
 ```
 
 **Standalone binary:**
 
 ```sh
-install -m 0755 nix-direnv-cdi_v0.1.0_linux_amd64 ~/.local/bin/nix-direnv-cdi
+install -m 0755 nix-direnv-cdi_v0.2.0_linux_amd64 ~/.local/bin/nix-direnv-cdi
 nix-direnv-cdi install
 ```
 
