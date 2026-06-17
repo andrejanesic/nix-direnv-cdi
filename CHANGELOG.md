@@ -6,6 +6,21 @@ This project follows SemVer for tagged releases. Release notes should call out
 runtime support changes, installer behavior changes, security-relevant changes,
 and known issues explicitly.
 
+## Unreleased
+
+### Fixed
+
+- **Rootless podman: hook no longer goes inert.** Rootless podman reports
+  `bundle="/"` in the createRuntime State, so the hook's `<bundle>/config.json`
+  read resolved to a non-existent `/config.json` and the device did nothing
+  (`read /config.json: no such file or directory`). The hook now (1) takes the
+  rootfs from the State's `root` field (set even when `bundle` is unusable) and
+  (2) falls back to podman's rootless config path
+  (`<graphroot>/overlay-containers/<id>/userdata/config.json`) when
+  `<bundle>/config.json` is unreadable. If `config.json` remains unreachable the
+  hook degrades to mount-only instead of becoming inert. Local podman tests
+  missed this because rootful podman passes a correct `bundle`.
+
 ## v0.1.0
 
 First public release. `nix-direnv-cdi` exposes a project's nix-direnv dev-shell

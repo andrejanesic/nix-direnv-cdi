@@ -279,6 +279,40 @@ func TestRun_GateOpen_MountsClosure(t *testing.T) {
 	}
 }
 
+// TestRun_NilSpec_MountsButNoWrap: when config.json is unreachable (rootless
+// podman bundle="/" and the derived path failed), Run passes spec=nil. The hook
+// must NOT crash and must still inject the closure mount (which needs only
+// pid+rootfs+closure); the entrypoint wrap is the only part that is skipped.
+func TestRun_NilSpec_MountsButNoWrap(t *testing.T) {
+	project := t.TempDir()
+	closure := []string{"/nix/store/aaa"}
+	if err := devshell.WriteMounts(filepath.Join(project, ".direnv", "cdi", "mounts.json"), closure); err != nil {
+		t.Fatal(err)
+	}
+
+	mounted := false
+	mount := func(pid int, rootfs string, c []string) error { mounted = true; return nil }
+	getenv := func(k string) (string, bool) {
+		if k == "DIRENV_DIR" {
+			return "-" + project, true
+		}
+		return "", false
+	}
+
+	rootfs := t.TempDir()
+	state := &oci.State{Pid: 7, Bundle: "/"}
+
+	if err := run(state, nil, rootfs, getenv, mount); err != nil {
+		t.Fatalf("run with nil spec: %v", err)
+	}
+	if !mounted {
+		t.Error("nil spec must still inject the closure mount")
+	}
+	if entries, _ := os.ReadDir(rootfs); len(entries) != 0 {
+		t.Error("nil spec: no entrypoint wrap should be written")
+	}
+}
+
 func TestRun_GateOpen_FromProcessEnv(t *testing.T) {
 	project := t.TempDir()
 	closure := []string{"/nix/store/aaa"}

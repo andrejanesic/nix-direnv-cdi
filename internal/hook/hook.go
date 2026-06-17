@@ -36,35 +36,46 @@ type mountFunc func(pid int, rootfs string, closure []string) error
 // getenvFunc mirrors os.LookupEnv (the hook's inherited environment).
 type getenvFunc func(string) (string, bool)
 
-// Run executes the createRuntime hook: read the OCI State from stdin, load
-// <bundle>/config.json, resolve the rootfs, then run the core. Best-effort: the
-// caller ignores the returned error and exits 0 so the container is never
+// Run executes the createRuntime hook: read the OCI State from stdin, load the
+// container's config.json, resolve the rootfs, then run the core. Best-effort:
+// the caller ignores the returned error and exits 0 so the container is never
 // broken.
+//
+// A missing/unreadable config.json is NOT fatal: rootless podman reports
+// bundle="/" and stashes config.json elsewhere, and even when the derived path
+// fails the mount injection only needs the pid + rootfs + closure (the rootfs
+// comes from the State's `root`). Only the entrypoint wrap needs the spec, so a
+// nil spec degrades to mount-only rather than making the whole device inert.
 func Run(in io.Reader) error {
 	state, err := ociconfig.ReadState(in)
 	if err != nil {
 		return err
 	}
-	spec, err := ociconfig.Load(state.Bundle)
-	if err != nil {
-		return err
+	spec, serr := ociconfig.LoadSpec(state)
+	if serr != nil {
+		spec = nil // continue best-effort: mount can still run; only the wrap is skipped
 	}
-	rootfs := resolveRootfs(spec, state.Bundle)
+	rootfs := resolveRootfs(state, spec)
 	if rootfs == "" {
 		return nil
 	}
-	return run(state, spec, rootfs, os.LookupEnv, nsmount.BindAll)
+	return run(&state.State, spec, rootfs, os.LookupEnv, nsmount.BindAll)
 }
 
-// resolveRootfs returns the absolute rootfs path from config.json's root.path
-// (joined onto the bundle when relative), or "" if absent.
-func resolveRootfs(spec *oci.Spec, bundle string) string {
-	if spec.Root == nil || spec.Root.Path == "" {
+// resolveRootfs returns the absolute rootfs path. It prefers the State's `root`
+// (podman provides the absolute rootfs path there, and it is set even when the
+// bundle is unusable), falling back to config.json's root.path joined onto the
+// bundle when relative. Returns "" if neither is available.
+func resolveRootfs(state *ociconfig.State, spec *oci.Spec) string {
+	if state.Root != "" {
+		return state.Root
+	}
+	if spec == nil || spec.Root == nil || spec.Root.Path == "" {
 		return ""
 	}
 	rootfs := spec.Root.Path
 	if !filepath.IsAbs(rootfs) {
-		rootfs = filepath.Join(bundle, rootfs)
+		rootfs = filepath.Join(state.Bundle, rootfs)
 	}
 	return rootfs
 }
@@ -76,6 +87,10 @@ func resolveRootfs(spec *oci.Spec, bundle string) string {
 func run(state *oci.State, spec *oci.Spec, rootfs string, getenv getenvFunc, mount mountFunc) error {
 	runtimeGetenv := getenvWithProcessEnv(getenv, spec)
 	dbg := debugLog(runtimeGetenv)
+
+	if spec == nil {
+		dbg("config.json unavailable: degrading to mount-only (entrypoint wrap skipped)")
+	}
 
 	dirRaw, ok := runtimeGetenv("DIRENV_DIR")
 	if !ok || dirRaw == "" {
@@ -163,8 +178,8 @@ func debugLog(getenv getenvFunc) func(string, ...any) {
 // Best-effort: any "nothing to wrap" condition returns nil; only a genuine I/O
 // failure mid-wrap returns an error.
 func wrapEntrypoint(spec *oci.Spec, rootfs string, prefix []string, env map[string]string) error {
-	if spec.Process == nil {
-		return nil
+	if spec == nil || spec.Process == nil {
+		return nil // no config.json (e.g. rootless podman fallback failed): mount-only
 	}
 	if len(prefix) == 0 && len(env) == 0 {
 		return nil

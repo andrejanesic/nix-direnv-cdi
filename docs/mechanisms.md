@@ -32,6 +32,20 @@ the host (runtime) namespace, after the container's mount namespace and mounts
 exist, but before `pivot_root`** — so it can read `config.json` and the OCI
 `State` (which carries the container `pid`) *and* affect the container's rootfs.
 
+**Locating `config.json` and the rootfs.** The OCI spec says `config.json` lives
+at `<bundle>/config.json` (the `bundle` is in the State). That holds for Docker
+and rootful podman. **Rootless podman, however, reports `bundle="/"`** and stashes
+the real config under `<graphroot>/overlay-containers/<id>/userdata/config.json`,
+so a naïve `<bundle>/config.json` read finds `/config.json` (absent) and the hook
+would go inert. Two things make it robust: (1) the rootfs is taken from the
+State's non-standard **`root`** field (podman includes the absolute rootfs path
+there; it is set even when `bundle` is unusable), and (2) when `<bundle>/config.json`
+is unreadable the hook derives the rootless path from `root` + the container `id`.
+If `config.json` is still unreachable, the hook **degrades to mount-only**: the
+closure is injected (it needs only pid + rootfs + closure) and only the entrypoint
+wrap — which needs `process.args`/`PATH` — is skipped, rather than the whole
+device becoming inert.
+
 ## 2. Dynamic mount injection (the closure)
 
 The dev-shell's tools live in `/nix/store`. The container must see those store
@@ -159,8 +173,8 @@ TIME A  podman frontend
 TIME B  crun creates the container
   ┌─ namespaces created; rootfs + mounts performed ─────────────────────────┐
   │  ► createRuntime hook fires (host ns, container pid known, pre-pivot)   │
-  │      reads:  OCI State (stdin) ........... pid, bundle                  │
-  │             config.json ................. rootfs, process.args, PATH    │
+  │      reads:  OCI State (stdin) ........... pid, bundle, root            │
+  │             config.json ................. process.args, PATH (+ rootfs) │
   │             inherited env ............... DIRENV_DIR, DIRENV_DIFF       │
   │             <DIRENV_DIR>/.direnv/cdi/mounts.json ... the closure        │
   │      gate:  DIRENV_DIR present?  no → exit 0 (inert)                    │
@@ -184,7 +198,7 @@ TIME C  the (wrapped) entrypoint execs
 | which device | constant `nix-direnv-cdi.org/env=current` | — | the `--device` arg |
 | project root / gate | `DIRENV_DIR` (hook env or OCI process env fallback) | run-time | hook |
 | `PATH` prefix + dev-shell env | `DIRENV_DIFF` (hook env or OCI process env fallback) | run-time | hook |
-| container pid / rootfs | OCI State (stdin) / `config.json` | run-time | hook |
+| container pid / rootfs | OCI State (stdin): `pid` / `root` (rootless podman: `bundle="/"`, so rootfs comes from `root`, not `config.json`) | run-time | hook |
 
 The split is deliberate: the **closure** is captured once at gen-time (it changes
 only with dependencies), while **`PATH`/env** are read live at run-time — always
